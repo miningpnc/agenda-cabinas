@@ -44,6 +44,10 @@ const yo = () => S.trabajadores.find(t => t.id === S.meId);
 const nombreCita = c => { const s = srv(c.servicio_id); return s.precio_libre && c.concepto ? `${s.nombre}: ${c.concepto}` : s.nombre; };
 const precioCita = c => c.precio != null ? +c.precio : (S.precios[c.servicio_id] || 0);
 const hayPrecioLibre = () => S.servicios.some(x => 'precio_libre' in x);
+const hayAltas = () => S.clientes.some(x => 'validado' in x);
+const pendienteAlta = c => hayAltas() && c && c.validado === false;
+// clientes que se pueden elegir: recepción todos; un trabajador solo los que ha creado él
+const misClientes = () => esRecepcion() ? S.clientes : S.clientes.filter(c => c.creado_por === S.user.id);
 const paraMi = a => !a.leido_en && (esRecepcion() ? a.para_rol === 'recepcion' : (a.para_rol === 'trabajador' && a.para_trabajador_id === S.meId));
 const misAvisos = () => S.avisos.filter(paraMi).sort((a, b) => b.creado_en.localeCompare(a.creado_en));
 
@@ -387,7 +391,7 @@ const ICONOS = {
 const BELL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>';
 function pestañas() {
   if (esRecepcion()) return [['agenda', 'Agenda'], ['clientes', 'Clientes'], ['facturacion', 'Facturación'], ['ajustes', 'Ajustes']];
-  const t = [['agenda', 'Mis citas']];
+  const t = [['agenda', 'Mis citas'], ['clientes', 'Mis clientes']];
   if (S.puedeFacturar) t.push(['facturacion', 'Facturación']);
   t.push(['cuenta', 'Cuenta']);
   return t;
@@ -850,7 +854,8 @@ function lineaHistorial(cid) {
   const h = S.hist[cid];
   if (!h) return '<span class="muted">Primera visita</span>';
   const nv = +h.no_vino, cls = nv >= 2 ? 'bad' : '';
-  return `<span class="${cls}">${+h.visitas} visitas · ${+h.canceladas} canceladas · <b>${nv} no vino</b>${h.ultima ? ' · última: ' + fechaCorta(h.ultima) : ''}</span>${nv >= 2 ? '<br><b class="bad">Cliente con ausencias repetidas</b>' : ''}`;
+  const ta = h.tarde != null ? +h.tarde : null;
+  return `<span class="${cls}">${+h.visitas} visitas · ${+h.canceladas} canceladas · <b>${nv} no vino</b>${ta != null ? ` · ${ta} con retraso` : ''}${h.ultima ? ' · última: ' + fechaCorta(h.ultima) : ''}</span>${nv >= 2 ? '<br><b class="bad">Cliente con ausencias repetidas</b>' : ''}${ta >= 3 ? '<br><b class="warn">Suele llegar tarde</b>' : ''}`;
 }
 async function obtenerCita(id) {
   let c = S.citas.find(x => x.id === id);
@@ -880,6 +885,8 @@ async function abrirCita(id, idiomaMsg) {
       ${esRecepcion() ? `<dt>Historial</dt><dd>${lineaHistorial(c.cliente_id)}</dd>` : ''}
     </dl>
     <div class="field"><span class="flabel">Estado</span><div class="seg">${Object.keys(ESTADOS).map(e => `<button aria-pressed="${c.estado === e}" onclick="cambiarEstado('${c.id}','${e}')">${ESTADOS[e]}</button>`).join('')}</div></div>
+    ${'llego_tarde' in c && (c.estado === 'confirmada' || c.estado === 'realizada') ? `<label class="switch"><span><b>Llegó tarde</b><br><small class="muted">Cuenta en el historial del cliente.</small></span><input type="checkbox" id="c-tarde" ${c.llego_tarde ? 'checked' : ''} onchange="marcarTarde('${c.id}', this.checked)"></label>` : ''}
+    ${esRecepcion() && pendienteAlta(cl) ? `<div class="box warnb">Cliente pendiente de alta: cuando llegue, pídele sus datos. <button class="linkbtn" onclick="abrirCliente('${cl.id}')">Abrir su ficha</button></div>` : ''}
     ${cobro ? `<div class="two"><div class="field"><label for="cb-imp">Cobrado (€)</label><input id="cb-imp" type="number" inputmode="decimal" step="0.01" value="${+cobro.importe}"></div>
       <div class="field"><label for="cb-met">Forma de pago</label><select id="cb-met"><option value="">—</option>${['efectivo', 'tarjeta', 'bizum', 'otro'].map(m => `<option ${cobro.metodo === m ? 'selected' : ''}>${m}</option>`).join('')}</select></div></div>
       <div class="actions" style="margin-top:8px"><button class="ghost" onclick="guardarCobro('${c.id}')">Guardar cobro</button></div>` : ''}
@@ -909,6 +916,12 @@ async function cambiarEstado(id, estado) {
   S.citas = S.citas.map(c => c.id === id ? r.data : c);
   await cargarDia(); if (esRecepcion()) await cargarHistorial();
   renderVista(); abrirCita(id); toast('Estado: ' + ESTADOS[estado]);
+}
+async function marcarTarde(id, v) {
+  const r = await sb.from('citas').update({ llego_tarde: v }).eq('id', id).select().maybeSingle();
+  if (r.error || !r.data) { toast(r.error ? traducirError(r.error) : 'No tienes permiso para cambiar esta cita'); return; }
+  S.citas = S.citas.map(c => c.id === id ? r.data : c); if (esRecepcion()) await cargarHistorial();
+  toast(v ? 'Marcada: llegó tarde' : 'Quitado el retraso');
 }
 async function guardarCobro(id) {
   const r = await sb.from('cobros').update({ importe: +$('#cb-imp').value || 0, metodo: $('#cb-met').value || null }).eq('cita_id', id).select().maybeSingle();
@@ -1049,7 +1062,7 @@ function pintarCliente() {
     return;
   }
   if (F.nuevoNombre !== '' && F.creandoCliente) {
-    box.innerHTML = `<div class="box info" style="margin-top:0"><b>Cliente nuevo</b>
+    box.innerHTML = `<div class="box info" style="margin-top:0"><b>Cliente nuevo</b>${esRecepcion() ? '' : '<br><small class="muted">Quedará en tu lista. Cuando venga, recepción completará sus datos y lo dará de alta en el centro.</small>'}
       <div class="field"><label for="nc-nombre">Nombre</label><input id="nc-nombre" value="${esc(F.nuevoNombre)}"></div>
       <div class="two"><div class="field"><label for="nc-tel">Teléfono</label><input id="nc-tel" inputmode="tel"></div>
       <div class="field"><label for="nc-lang">Idioma</label><select id="nc-lang">${Object.entries(LANGS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div></div>
@@ -1061,8 +1074,8 @@ function pintarCliente() {
   q.oninput = () => {
     const t = q.value.trim().toLowerCase(), res = $('#f-cli-res');
     if (!t) { res.innerHTML = ''; return; }
-    const m = S.clientes.filter(c => c.nombre.toLowerCase().includes(t) || (c.telefono || '').replace(/\s/g, '').includes(t.replace(/\s/g, ''))).slice(0, 6);
-    res.innerHTML = `<div class="results">${m.map(c => `<button type="button" data-id="${c.id}"><b>${esc(c.nombre)}</b> <small class="muted">${esc(c.telefono || '')}</small>${esRecepcion() && S.hist[c.id] && +S.hist[c.id].no_vino >= 2 ? ' <small class="bad">· ' + S.hist[c.id].no_vino + ' no vino</small>' : ''}</button>`).join('')}<button type="button" data-new="1">+ Crear «${esc(q.value.trim())}» como cliente nuevo</button></div>`;
+    const m = misClientes().filter(c => c.nombre.toLowerCase().includes(t) || (c.telefono || '').replace(/\s/g, '').includes(t.replace(/\s/g, ''))).slice(0, 6);
+    res.innerHTML = `<div class="results">${m.map(c => `<button type="button" data-id="${c.id}"><b>${esc(c.nombre)}</b> <small class="muted">${esc(c.telefono || '')}</small>${pendienteAlta(c) ? ' <small class="warn">· pendiente de alta</small>' : ''}${esRecepcion() && S.hist[c.id] && +S.hist[c.id].no_vino >= 2 ? ' <small class="bad">· ' + S.hist[c.id].no_vino + ' no vino</small>' : ''}</button>`).join('')}<button type="button" data-new="1">+ Crear «${esc(q.value.trim())}» como cliente nuevo</button></div>`;
     res.querySelectorAll('button[data-id]').forEach(b => b.onclick = () => { F.cliente = cli(b.dataset.id); pintarCliente(); });
     res.querySelector('button[data-new]').onclick = () => { F.nuevoNombre = q.value.trim(); F.creandoCliente = true; pintarCliente(); };
   };
@@ -1142,31 +1155,75 @@ async function todoRecibido() {
 }
 
 /* ================= clientes (recepción) ================= */
+function filaCliente(c) {
+  const h = S.hist[c.id], nv = h ? +h.no_vino : 0, ta = h && h.tarde != null ? +h.tarde : null;
+  const sub = esRecepcion()
+    ? (h ? `${+h.visitas} visitas · ${+h.canceladas} canceladas · ${nv} no vino${ta != null ? ' · ' + ta + ' tarde' : ''}` : 'Sin visitas todavía')
+    : (pendienteAlta(c) ? 'Pendiente de alta en recepción' : 'Dado de alta en el centro');
+  return `<button class="row" onclick="abrirCliente('${c.id}')"><span class="avatar">${esc(iniciales(c.nombre))}</span><span class="main"><b>${esc(c.nombre)}</b><small class="${esRecepcion() && nv >= 2 ? 'bad' : (!esRecepcion() && pendienteAlta(c) ? 'warn' : '')}">${sub}</small></span>${esRecepcion() && pendienteAlta(c) ? '<span class="tag warn">Pendiente</span>' : ''}<span class="lang">${esc((c.idioma || 'es').toUpperCase())}</span></button>`;
+}
 function vistaClientes() {
   const t = S.q.trim().toLowerCase();
-  const l = S.clientes.filter(c => !t || c.nombre.toLowerCase().includes(t) || (c.telefono || '').replace(/\s/g, '').includes(t.replace(/\s/g, '')));
+  const coincide = c => !t || c.nombre.toLowerCase().includes(t) || (c.telefono || '').replace(/\s/g, '').includes(t.replace(/\s/g, ''));
+  const base = misClientes().filter(coincide);
+  const pend = esRecepcion() ? base.filter(pendienteAlta) : [];
+  const l = esRecepcion() ? base.filter(c => !pendienteAlta(c)) : base;
   return `<div class="toolbar"><input id="q" type="search" placeholder="Buscar por nombre o teléfono" value="${esc(S.q)}" oninput="S.q=this.value;mantenerFoco('q')"><button class="primary" onclick="abrirCliente()">+ Cliente</button></div>
-  <div class="list">${l.map(c => {
-    const h = S.hist[c.id], nv = h ? +h.no_vino : 0;
-    return `<button class="row" onclick="abrirCliente('${c.id}')"><span class="avatar">${esc(iniciales(c.nombre))}</span><span class="main"><b>${esc(c.nombre)}</b><small class="${nv >= 2 ? 'bad' : ''}">${h ? `${+h.visitas} visitas · ${+h.canceladas} canceladas · ${nv} no vino` : 'Sin visitas todavía'}</small></span><span class="lang">${esc((c.idioma || 'es').toUpperCase())}</span></button>`;
-  }).join('') || '<p class="row muted">Ningún cliente coincide con la búsqueda.</p>'}</div>
-  <p class="note">En rojo, clientes con 2 o más ausencias. Esta agenda no guarda historia clínica: eso sigue en el programa de pacientes del centro.</p>`;
+  ${pend.length ? `<div class="sect" style="margin-top:6px">Pendientes de alta (${pend.length})</div>
+    <p class="note" style="margin-top:0">Los han apuntado los trabajadores. Cuando el cliente venga, completa sus datos y dalo de alta, o únelo con su ficha si ya existía.</p>
+    <div class="list">${pend.map(filaCliente).join('')}</div><div class="sect">Clientes del centro</div>` : ''}
+  ${!esRecepcion() ? `<p class="note" style="margin-top:0">Aquí solo están los clientes que has creado tú. La lista completa del centro la gestiona recepción.</p>` : ''}
+  <div class="list">${l.map(filaCliente).join('') || `<p class="row muted">${t ? 'Ningún cliente coincide con la búsqueda.' : esRecepcion() ? 'Aún no hay clientes.' : 'Todavía no has creado clientes. Puedes hacerlo al dar una cita o con «+ Cliente».'}</p>`}</div>
+  <p class="note">${esRecepcion() ? 'En rojo, clientes con 2 o más ausencias. ' : ''}Esta agenda no guarda historia clínica: eso sigue en el programa de pacientes del centro.</p>`;
 }
 function mantenerFoco(id) { const el = $('#' + id), p = el.selectionStart; renderVista(); const n = $('#' + id); n.focus(); try { n.setSelectionRange(p, p); } catch (e) { } }
 async function abrirCliente(id) {
   const c = id ? cli(id) : { nombre: '', telefono: '', email: '', idioma: 'es', notas: '' };
   let citas = [];
   if (id) { const r = await sb.from('citas').select('*').eq('cliente_id', id).order('inicio', { ascending: false }).limit(60); citas = r.data || []; }
+  if (esRecepcion() && id && pendienteAlta(c) && !S.vinculadosUsuarios) { const rp = await sb.from('perfiles').select('user_id,trabajador_id'); S.vinculadosUsuarios = {}; (rp.data || []).forEach(x => S.vinculadosUsuarios[x.user_id] = x.trabajador_id); }
+  const puedeEditar = esRecepcion() || !id || (c.creado_por === S.user.id && pendienteAlta(c));
   sheet(`<h3>${id ? esc(c.nombre) : 'Cliente nuevo'}</h3>${id ? `<p style="margin:0">${lineaHistorial(id)}</p>` : ''}
+    ${id && pendienteAlta(c) && esRecepcion() ? `<div class="box warnb"><b>Pendiente de alta.</b> Lo apuntó ${esc((S.trabajadores.find(t => S.vinculadosUsuarios && S.vinculadosUsuarios[c.creado_por] === t.id) || {}).nombre || 'un trabajador')}. Revisa sus datos con el cliente y dalo de alta, o únelo con su ficha si ya existía.
+      <div class="actions" style="margin-top:8px"><button class="primary" onclick="darDeAlta('${id}')">Dar de alta</button><button class="ghost" onclick="unirCliente('${id}')">Ya existe: unir</button></div></div>` : ''}
+    ${id && !esRecepcion() ? `<div class="box ${pendienteAlta(c) ? 'warnb' : 'info'}">${pendienteAlta(c) ? 'Pendiente de alta: recepción completará sus datos cuando venga. Mientras tanto puedes corregirlos.' : 'Dado de alta en el centro. Para cambiar sus datos, habla con recepción.'}</div>` : ''}
     <div class="field"><label for="c-nombre">Nombre</label><input id="c-nombre" value="${esc(c.nombre)}"></div>
     <div class="two"><div class="field"><label for="c-tel">Teléfono</label><input id="c-tel" inputmode="tel" value="${esc(c.telefono || '')}"></div>
       <div class="field"><label for="c-lang">Idioma</label><select id="c-lang">${Object.entries(LANGS).map(([k, v]) => `<option value="${k}" ${k === (c.idioma || 'es') ? 'selected' : ''}>${v}</option>`).join('')}</select></div></div>
     <div class="field"><label for="c-email">Email</label><input id="c-email" type="email" value="${esc(c.email || '')}"></div>
     <div class="field"><label for="c-notas">Notas (preferencias; sin datos clínicos)</label><textarea id="c-notas" rows="2">${esc(c.notas || '')}</textarea></div>
     <div class="err" id="c-err"></div>
-    <div class="actions"><button class="ghost" onclick="closeSheet()">Cerrar</button><button class="primary" onclick="guardarCliente(${id ? `'${id}'` : 'null'})">Guardar</button></div>
+    <div class="actions"><button class="ghost" onclick="closeSheet()">Cerrar</button>${puedeEditar ? `<button class="primary" onclick="guardarCliente(${id ? `'${id}'` : 'null'})">Guardar</button>` : ''}</div>
     ${id ? `<div class="actions" style="margin-top:8px"><button class="ghost" onclick="closeSheet();abrirFormulario(null,{cliente_id:'${id}'})">Nueva cita para este cliente</button></div>
     <div class="sect">Historial</div><div class="list">${citas.map(x => `<button class="row" onclick="verCitaAviso('${x.id}')"><span class="main"><b>${esc(nombreCita(x))}</b><small>${new Date(x.inicio).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: '2-digit' })} ${hhmm(new Date(x.inicio))} · ${esc(trab(x.trabajador_id).nombre)}</small></span><span class="end ${x.estado === 'no vino' ? 'bad' : x.estado === 'cancelada' ? 'warn' : x.estado === 'realizada' ? 'ok' : ''}">${ESTADOS[x.estado]}</span></button>`).join('') || '<p class="row muted">Sin citas todavía.</p>'}</div>` : ''}`);
+}
+async function darDeAlta(id) {
+  const d = { nombre: $('#c-nombre').value.trim(), telefono: $('#c-tel').value.trim() || null, idioma: $('#c-lang').value, email: $('#c-email').value.trim() || null, notas: $('#c-notas').value.trim() || null, validado: true };
+  if (!d.nombre) { $('#c-err').textContent = 'Escribe el nombre.'; return; }
+  const r = await sb.from('clientes').update(d).eq('id', id).select().maybeSingle();
+  if (r.error || !r.data) { $('#c-err').textContent = r.error ? traducirError(r.error) : 'No tienes permiso.'; return; }
+  await cargarClientes(); closeSheet(); renderVista(); toast('Cliente dado de alta en el centro');
+}
+function unirCliente(id) {
+  const c = cli(id);
+  sheet(`<h3>Unir «${esc(c.nombre)}» con un cliente existente</h3>
+    <p class="muted" style="margin:0">Sus citas pasarán a la ficha que elijas y esta ficha provisional se borrará. Los datos que falten en la ficha elegida se completarán con estos.</p>
+    <div class="field"><label for="u-q">Buscar cliente del centro</label><input id="u-q" type="search" placeholder="Nombre o teléfono" value="${esc(c.nombre.split(' ')[0])}" autocomplete="off"></div>
+    <div id="u-res"></div>
+    <div class="actions"><button class="ghost" onclick="abrirCliente('${id}')">Volver</button></div>`);
+  const pintar = () => {
+    const t = $('#u-q').value.trim().toLowerCase();
+    const m = S.clientes.filter(x => x.id !== id && !pendienteAlta(x) && (!t || x.nombre.toLowerCase().includes(t) || (x.telefono || '').replace(/\s/g, '').includes(t.replace(/\s/g, '')))).slice(0, 8);
+    $('#u-res').innerHTML = `<div class="results">${m.map(x => `<button type="button" data-id="${x.id}"><b>${esc(x.nombre)}</b> <small class="muted">${esc(x.telefono || '')}</small></button>`).join('') || '<button type="button" disabled>Ningún cliente coincide</button>'}</div>`;
+    $('#u-res').querySelectorAll('button[data-id]').forEach(b => b.onclick = async () => {
+      const destino = cli(b.dataset.id);
+      if (!(await preguntar('Unir clientes', `Las citas de «${c.nombre}» pasarán a «${destino.nombre}» y la ficha provisional se borrará.`, 'Unir', 'Cancelar'))) return;
+      const r = await sb.rpc('fusionar_clientes', { p_origen: id, p_destino: destino.id });
+      if (r.error) { toast(r.error.message); return; }
+      await cargarClientes(); await cargarHistorial(); await cargarDia(); closeSheet(); renderVista(); toast(`Unido con ${destino.nombre}`);
+    });
+  };
+  $('#u-q').oninput = pintar; pintar();
 }
 async function guardarCliente(id) {
   const d = { nombre: $('#c-nombre').value.trim(), telefono: $('#c-tel').value.trim() || null, idioma: $('#c-lang').value, email: $('#c-email').value.trim() || null, notas: $('#c-notas').value.trim() || null };
