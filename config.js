@@ -3,8 +3,8 @@
 // La clave "publishable" (o "anon public") puede ir aquí sin problema.
 // NUNCA pongas aquí la clave "secret" ni la "service_role".
 window.APP_CONFIG = {
-  supabaseUrl: 'https://TU-PROYECTO.supabase.co',
-  supabaseKey: 'TU-CLAVE-PUBLISHABLE',
+  supabaseUrl: 'https://kyujqjnhypjkvcblpqtu.supabase.co',
+  supabaseKey: 'sb_publishable_psgvcwg2opBU9g2Je7zyUg_3xykqLwW',
 
   // false = solo entran los usuarios que crea el centro (no hay registro público)
   permitirRegistro: false,
