@@ -311,7 +311,7 @@ async function cargarBase() {
   S.tAct = {}; chk(ta).forEach(r => (S.tAct[r.trabajador_id] = S.tAct[r.trabajador_id] || new Set()).add(r.actividad_id));
   S.tCab = {}; chk(tc).forEach(r => (S.tCab[r.trabajador_id] = S.tCab[r.trabajador_id] || []).push(r));
   S.precios = {}; chk(pr).forEach(r => S.precios[r.servicio_id] = +r.precio);
-  await cargarHistorial();
+  await Promise.all([cargarHistorial(), cargarHorario()]);
 }
 async function cargarHistorial() {
   S.hist = {};
@@ -325,8 +325,9 @@ async function cargarDia() {
   const campos = S.vista === 'anio' ? 'id,inicio,fin,estado,trabajador_id,servicio_id,cabina_id,cliente_id' : '*';
   const [c, ch] = await Promise.all([
     sb.from('citas').select(campos).gte('inicio', a.toISOString()).lt('inicio', b.toISOString()).order('inicio').limit(5000),
-    sb.rpc('citas_con_choque', { p_desde: a.toISOString(), p_hasta: b.toISOString() })
-  ]);
+    sb.rpc('citas_con_choque', { p_desde: a.toISOString(), p_hasta: b.toISOString() }),
+    sb.from('bloqueos').select('*').lt('inicio', b.toISOString()).gt('fin', a.toISOString())
+  ]).then(r => { S.bloqueosOK = !r[2].error; S.bloqueos = r[2].error ? [] : r[2].data; return r; });
   S.citas = c.error ? [] : c.data;
   S.choques = new Set(ch.error ? [] : (ch.data || []).map(x => typeof x === 'string' ? x : Object.values(x)[0]));
   const faltan = [...new Set(S.citas.map(x => x.cliente_id).filter(id => id && !S.clientes.some(c => c.id === id)))];
@@ -363,6 +364,9 @@ function suscribir() {
       S.avisos = S.avisos.map(x => x.id === a.id ? a : x).filter(x => !x.leido_en);
       pintarCampana(); if (S.tab === 'agenda') renderVista();
     })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'bloqueos' }, p => { if (p.eventType === 'INSERT' && esRecepcion() && p.new && p.new.creado_por !== S.user.id) { pitido(); toast(`${trab(p.new.trabajador_id).nombre} ha bloqueado: ${textoBloqueo(p.new)}`); } refrescarPronto(); })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'dias_especiales' }, async () => { await cargarHorario(); if (S.tab === 'agenda' || S.tab === 'ajustes') renderVista(); })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'horario_semanal' }, async () => { await cargarHorario(); if (S.tab === 'agenda' || S.tab === 'ajustes') renderVista(); })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, async () => { await cargarClientes(); if (S.tab === 'clientes' && document.activeElement?.id !== 'q') renderVista(); })
     .subscribe();
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { cargarAvisos().then(pintarCampana); refrescarPronto(); } });
@@ -493,23 +497,23 @@ function vistaAgenda() {
     <input type="date" id="pick-day" class="pill" value="${S.day}" onchange="if(this.value){S.day=this.value;recargarDia()}" aria-label="Elegir fecha">
     ${esRecepcion() && S.vista !== 'dia' ? `<select id="f-trab-filtro" class="pill" onchange="S.filtroTrab=this.value;renderVista()" aria-label="Filtrar por trabajador"><option value="">Todo el equipo</option>${S.trabajadores.filter(t => t.activo).map(t => `<option value="${t.id}" ${S.filtroTrab === t.id ? 'selected' : ''}>${esc(t.nombre)}</option>`).join('')}</select>` : ''}
     <span class="grow"></span>
+    <button class="ghost" onclick="nuevoBloqueo()">Bloquear horas</button>
     <button class="primary" onclick="abrirFormulario()">+ Cita</button>
   </div>
   <div class="summary" style="padding-bottom:10px"><span><b>${visibles.length}</b> ${visibles.length === 1 ? 'cita' : 'citas'}</span>${S.puedeFacturar ? `<span>Previsto <b>${eur(prevision)}</b></span>` : ''}${nChoques ? `<span class="bad"><b class="bad">${nChoques}</b> en cabina compartida</span>` : ''}</div>
   ${esRecepcion() && S.actividades.length > 1 ? `<div class="chips"><button aria-pressed="${!S.filtroAct}" onclick="S.filtroAct='';renderVista()">Todas las actividades</button>${S.actividades.filter(a => a.activa).map(a => `<button aria-pressed="${S.filtroAct === a.id}" onclick="S.filtroAct='${a.id}';renderVista()"><i style="background:${esc(a.color)}"></i>${esc(a.nombre)}</button>`).join('')}</div>` : ''}
   ${cuerpo(lista)}
-  <div class="legend">${S.actividades.filter(a => a.activa).map(a => `<span><i style="width:10px;height:10px;border-radius:3px;background:${esc(a.color)};display:inline-block"></i>${esc(a.nombre)}</span>`).join('')}<span><span class="flag red" style="margin:0">Cabina compartida</span></span>${esRecepcion() ? '<span><span class="flag wait" style="margin:0">Sin confirmar</span> el trabajador aún no ha pulsado «Recibido»</span>' : ''}</div>
+  <div class="legend">${S.actividades.filter(a => a.activa).map(a => `<span><i style="width:10px;height:10px;border-radius:3px;background:${esc(a.color)};display:inline-block"></i>${esc(a.nombre)}</span>`).join('')}<span><span class="flag red" style="margin:0">Cabina compartida</span></span><span><span class="bloq-ley"></span>Bloqueado</span><span><span class="cerr-ley"></span>Cerrado o festivo</span>${esRecepcion() ? '<span><span class="flag wait" style="margin:0">Sin confirmar</span> el trabajador aún no ha pulsado «Recibido»</span>' : ''}</div>
   <p class="note">${S.vista === 'dia' || S.vista === 'semana' ? 'Toca un hueco libre para crear una cita a esa hora.' : 'Toca un día para verlo en detalle.'} Los cambios aparecen al momento en todos los dispositivos.</p>`;
 }
 
 function cuerpoDia() {
-  const OPEN = toMin(S.ajustes.hora_apertura || '09:00'), CLOSE = toMin(S.ajustes.hora_cierre || '21:00');
-  const cols = columnas(), H = (CLOSE - OPEN) / 15 * PX;
+  const cols = columnas(), [OPEN, CLOSE] = limites([S.day], S.citas), H = (CLOSE - OPEN) / 15 * PX;
   const visibles = S.citas.filter(c => c.estado !== 'cancelada' && cols.some(t => t.id === c.trabajador_id));
   const canceladas = S.citas.filter(c => c.estado === 'cancelada');
   if (!cols.length) return `<div class="list"><p class="row muted">${esRecepcion() ? 'No hay trabajadores con este filtro. Añádelos en Ajustes → Equipo.' : 'Tu ficha de trabajador no está activa. Habla con recepción.'}</p></div>`;
-  const htmlCols = cols.map(t => `<div class="col" style="height:${H}px" onclick="clicHueco(event,'${t.id}')">${visibles.filter(c => c.trabajador_id === t.id).map(c => bloqueCita(c, OPEN)).join('')}</div>`).join('');
-  return `<div class="gridwrap"><div class="grid" style="--cols:${cols.length};--hour:${4 * PX}px">
+  const htmlCols = cols.map(t => `<div class="col" style="height:${H}px" onclick="clicHueco(event,'${t.id}')">${sombras(S.day, OPEN, CLOSE)}${capasBloqueo(bloqueosDe(t.id, S.day), S.day, OPEN, CLOSE)}${visibles.filter(c => c.trabajador_id === t.id).map(c => bloqueCita(c, OPEN)).join('')}</div>`).join('');
+  return `${bannerDia(S.day)}<div class="gridwrap"><div class="grid" style="--cols:${cols.length};--hour:${4 * PX}px">
     <div class="ghead"><div></div>${cols.map(t => `<div>${esc(t.nombre)}<small>${esc([...(S.tAct[t.id] || [])].map(id => act(id).nombre).join(', ') || 'Sin actividad')}</small></div>`).join('')}</div>
     <div class="gbody"><div class="times" style="height:${H}px">${horasGrid(OPEN, CLOSE)}</div>${htmlCols}${S.day === dkey(new Date()) ? lineaAhora(OPEN, CLOSE) : ''}</div>
   </div></div>
@@ -517,18 +521,18 @@ function cuerpoDia() {
 }
 
 function cuerpoSemana(lista) {
-  const OPEN = toMin(S.ajustes.hora_apertura || '09:00'), CLOSE = toMin(S.ajustes.hora_cierre || '21:00'), H = (CLOSE - OPEN) / 15 * PX;
   const lunes = lunesDe(S.day), hoy = dkey(new Date());
   const dias = [...Array(7)].map((_, i) => addDays(lunes, i));
+  const [OPEN, CLOSE] = limites(dias, lista), H = (CLOSE - OPEN) / 15 * PX;
   const varios = esRecepcion() && !S.filtroTrab;
   const cols = dias.map(k => {
     const delDia = lista.filter(c => dkey(new Date(c.inicio)) === k), car = carriles(delDia);
     const bloques = delDia.map(c => { const l = car.get(c.id) || { i: 0, n: 1 }; const w = 100 / l.n; return bloqueCita(c, OPEN, `left:calc(${l.i * w}% + 2px);right:auto;width:calc(${w}% - 4px)`, varios); }).join('');
-    return `<div class="col" style="height:${H}px" onclick="clicHueco(event,'${S.filtroTrab || (esRecepcion() ? '' : S.meId)}','${k}')">${bloques}</div>`;
+    return `<div class="col" style="height:${H}px" onclick="clicHueco(event,'${S.filtroTrab || (esRecepcion() ? '' : S.meId)}','${k}')">${sombras(k, OPEN, CLOSE)}${capasBloqueo((S.bloqueos || []).filter(x => columnas().some(t => t.id === x.trabajador_id) && bloqueosDe(x.trabajador_id, k).includes(x)), k, OPEN, CLOSE, varios)}${bloques}</div>`;
   }).join('');
   const iHoy = dias.indexOf(hoy);
   return `<div class="gridwrap"><div class="grid semana" style="--cols:7;--hour:${4 * PX}px">
-    <div class="ghead"><div></div>${dias.map(k => { const d = new Date(k + 'T12:00'); return `<div class="${k === hoy ? 'hoy' : ''}"><button class="dayhead" onclick="irADia('${k}')">${d.toLocaleDateString('es-ES', { weekday: 'short' })} <b>${d.getDate()}</b></button><small>${(n => n ? n + (n === 1 ? ' cita' : ' citas') : 'Libre')(lista.filter(c => dkey(new Date(c.inicio)) === k).length)}</small></div>`; }).join('')}</div>
+    <div class="ghead"><div></div>${dias.map(k => { const d = new Date(k + 'T12:00'); return `<div class="${k === hoy ? 'hoy' : ''}"><button class="dayhead" onclick="irADia('${k}')">${d.toLocaleDateString('es-ES', { weekday: 'short' })} <b>${d.getDate()}</b></button>${horarioDe(k).abierto ? `<small>${(n => n ? n + (n === 1 ? ' cita' : ' citas') : 'Libre')(lista.filter(c => dkey(new Date(c.inicio)) === k).length)}${horarioDe(k).especial ? ' · ' + horarioDe(k).ap + '–' + horarioDe(k).ci : ''}</small>` : `<small class="cerr">${esc(horarioDe(k).motivo || 'Cerrado')}</small>`}</div>`; }).join('')}</div>
     <div class="gbody"><div class="times" style="height:${H}px">${horasGrid(OPEN, CLOSE)}</div>${cols}${iHoy >= 0 ? lineaAhora(OPEN, CLOSE, `calc(48px + (100% - 48px) / 7 * ${iHoy})`, 'calc((100% - 48px) / 7)') : ''}</div>
   </div></div>`;
 }
@@ -542,8 +546,11 @@ function cuerpoMes(lista) {
   for (let i = 0; i < semanas * 7; i++) {
     const k = addDays(inicio, i), dd = new Date(k + 'T12:00'), fuera = dd.getMonth() !== m;
     const cs = (porDia[k] || []).sort((a, b) => a.inicio.localeCompare(b.inicio)), ch = cs.some(c => S.choques.has(c.id));
-    celdas += `<button class="mcell ${fuera ? 'fuera' : ''} ${k === hoy ? 'hoy' : ''}" onclick="irADia('${k}')" aria-label="${dd.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}: ${cs.length} citas">
+    const hd = horarioDe(k);
+    celdas += `<button class="mcell ${fuera ? 'fuera' : ''} ${k === hoy ? 'hoy' : ''} ${hd.abierto ? '' : 'cerrada'}" onclick="irADia('${k}')" aria-label="${dd.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}: ${cs.length} citas">
       <span class="mnum">${dd.getDate()}${ch ? '<i class="mdot" title="Cabina compartida"></i>' : ''}</span>
+      ${(b => b.length ? `<span class="mtag bl">Bloqueo: ${esc([...new Set(b.map(x => trab(x.trabajador_id).nombre))].join(', '))}</span>` : '')(bloqueosDe('', k).filter(x => columnas().some(t => t.id === x.trabajador_id)))}
+      ${!hd.abierto ? `<span class="mtag">${esc(hd.especial ? (hd.motivo || 'Festivo') : 'Cerrado')}</span>` : hd.especial ? `<span class="mtag ab">${hd.ap}–${hd.ci}</span>` : ''}
       ${cs.slice(0, 3).map(c => `<span class="mline" style="--c:${esc(act(srv(c.servicio_id).actividad_id).color)}">${hhmm(new Date(c.inicio))} ${esc(esRecepcion() && !S.filtroTrab ? trab(c.trabajador_id).nombre : cli(c.cliente_id).nombre)}</span>`).join('')}
       ${cs.length > 3 ? `<span class="mmore">+${cs.length - 3} más</span>` : ''}
       ${cs.length ? `<span class="mcount">${cs.length}</span>` : ''}</button>`;
@@ -561,24 +568,277 @@ function cuerpoAnio(lista) {
     for (let dd = 1; dd <= nd; dd++) {
       const k = dkey(new Date(y, m, dd, 12)), n = porDia[k] || 0; total += n;
       const nivel = n ? Math.min(4, Math.ceil(n / max * 4)) : 0;
-      celdas += `<button class="ycell n${nivel} ${k === hoy ? 'hoy' : ''}" onclick="irADia('${k}')" title="${dd}: ${n} citas" aria-label="${dd} de ${primero.toLocaleDateString('es-ES', { month: 'long' })}: ${n} citas">${dd}</button>`;
+      const hd = horarioDe(k); celdas += `<button class="ycell n${nivel} ${k === hoy ? 'hoy' : ''} ${hd.abierto ? '' : 'cerrada'}" onclick="irADia('${k}')" title="${dd}: ${hd.abierto ? n + ' citas' : esc(hd.motivo || 'Cerrado')}" aria-label="${dd} de ${primero.toLocaleDateString('es-ES', { month: 'long' })}: ${n} citas">${dd}</button>`;
     }
     return `<div class="ymonth"><button class="yname" onclick="S.day='${dkey(primero)}';cambiarVista('mes')">${primero.toLocaleDateString('es-ES', { month: 'long' })}<small>${total === 1 ? '1 cita' : total + ' citas'}</small></button>
       <div class="yhead">${DSEM.map(x => `<span>${x}</span>`).join('')}</div><div class="ygrid">${celdas}</div></div>`;
   }).join('');
   return `<div class="year">${meses}</div>
-  <div class="legend"><span>Menos</span>${[0, 1, 2, 3, 4].map(n => `<span class="ycell n${n}" style="width:16px;height:16px;padding:0"></span>`).join('')}<span>Más citas</span></div>`;
+  <div class="legend"><span>Menos</span>${[0, 1, 2, 3, 4].map(n => `<span class="ycell n${n}" style="width:16px;height:16px;padding:0"></span>`).join('')}<span>Más citas</span><span class="ycell cerrada" style="width:16px;height:16px;padding:0"></span><span>Cerrado o festivo</span></div>`;
 }
 
 async function recargarDia() { await cargarDia(); renderVista(); }
 function cambiarDia(n) { moverAgenda(n); }
 function irHoy() { S.day = dkey(new Date()); recargarDia(); }
 function clicHueco(e, tid, fecha) {
-  const OPEN = toMin(S.ajustes.hora_apertura || '09:00'), CLOSE = toMin(S.ajustes.hora_cierre || '21:00');
+  const k = fecha || S.day;
+  const [OPEN, CLOSE] = S.vista === 'semana' ? limites([...Array(7)].map((_, i) => addDays(lunesDe(S.day), i)), S.citas) : limites([S.day], S.citas);
   const r = e.currentTarget.getBoundingClientRect();
   let m = OPEN + Math.floor((e.clientY - r.top) / PX) * 15;
   m = Math.min(Math.max(m, OPEN), CLOSE - 15);
-  abrirFormulario(null, { hora: minToT(m), trabajador_id: tid || '', fecha: fecha || S.day });
+  if (fueraDeHorario(k, m, m + 15)) { avisoCerrado(k); return; }
+  const tq = tid || (esRecepcion() ? '' : S.meId), bq = tq && bloqueoEn(tq, k, m, m + 15);
+  if (bq) { abrirBloqueo(bq.id); return; }
+  abrirFormulario(null, { hora: minToT(m), trabajador_id: tid || '', fecha: k });
+}
+
+
+/* ================= horario y festivos ================= */
+const NOMBRE_DIA = ['', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+const isoDia = k => ((new Date(k + 'T12:00').getDay() + 6) % 7) + 1;
+const fechaLarga = k => new Date(k + 'T12:00').toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
+const t5 = t => t ? String(t).slice(0, 5) : '';
+async function cargarHorario() {
+  const [h, e] = await Promise.all([sb.from('horario_semanal').select('*'), sb.from('dias_especiales').select('*').order('fecha')]);
+  S.horarioOK = !h.error && !e.error;
+  S.horario = {}; (h.data || []).forEach(r => S.horario[r.dia] = r);
+  S.especiales = {}; (e.data || []).forEach(r => S.especiales[r.fecha] = r);
+}
+function horarioDe(k) {
+  const e = (S.especiales || {})[k];
+  if (e) return { abierto: e.abierto, ap: t5(e.apertura), ci: t5(e.cierre), motivo: e.motivo || '', especial: true };
+  const h = (S.horario || {})[isoDia(k)];
+  if (h) return { abierto: h.abierto, ap: t5(h.apertura), ci: t5(h.cierre), motivo: '', especial: false };
+  return { abierto: true, ap: t5(S.ajustes.hora_apertura || '09:00'), ci: t5(S.ajustes.hora_cierre || '21:00'), motivo: '', especial: false };
+}
+function textoHorario(k) {
+  const h = horarioDe(k);
+  if (!h.abierto) return h.especial ? 'Cerrado' + (h.motivo ? ' · ' + h.motivo : '') : `Cerrado (${NOMBRE_DIA[isoDia(k)].toLowerCase()})`;
+  return `${h.ap}–${h.ci}` + (h.especial ? ' · ' + (h.motivo || 'horario especial') : '');
+}
+function fueraDeHorario(k, m0, m1) { const h = horarioDe(k); return !h.abierto || m0 < toMin(h.ap) || m1 > toMin(h.ci); }
+// franja horaria que se dibuja: la del horario de esos días, ampliada si hay citas fuera
+function limites(dias, citas = []) {
+  let o = Infinity, c = -Infinity;
+  dias.forEach(k => { const h = horarioDe(k); if (h.abierto) { o = Math.min(o, toMin(h.ap)); c = Math.max(c, toMin(h.ci)); } });
+  citas.filter(x => x.estado !== 'cancelada').forEach(x => { const i = new Date(x.inicio), f = new Date(x.fin); o = Math.min(o, i.getHours() * 60 + i.getMinutes()); c = Math.max(c, f.getHours() * 60 + f.getMinutes()); });
+  if (!isFinite(o)) { o = toMin(S.ajustes.hora_apertura || '09:00'); c = toMin(S.ajustes.hora_cierre || '21:00'); }
+  o = Math.max(0, Math.floor(o / 60) * 60); c = Math.min(1440, Math.ceil(c / 60) * 60);
+  if (c - o < 180) c = Math.min(1440, o + 180);
+  return [o, c];
+}
+// zonas cerradas pintadas sobre una columna de la agenda
+function sombras(k, OPEN, CLOSE) {
+  const h = horarioDe(k), px = m => (m - OPEN) / 15 * PX;
+  if (!h.abierto) return `<div class="cerrado todo"><span>${esc(h.especial ? (h.motivo || 'Festivo') : 'Cerrado')}</span></div>`;
+  let s = ''; const a = toMin(h.ap), c = toMin(h.ci);
+  if (a > OPEN) s += `<div class="cerrado" style="top:0;height:${px(a)}px"></div>`;
+  if (c < CLOSE) s += `<div class="cerrado" style="top:${px(c)}px;height:${px(CLOSE) - px(c)}px"></div>`;
+  return s;
+}
+function bannerDia(k) {
+  if (!S.horarioOK && !esRecepcion()) return '';
+  const h = horarioDe(k), rec = esRecepcion();
+  const cls = !h.abierto ? 'daystate cerr' : h.especial ? 'daystate esp' : 'daystate';
+  const txt = !h.abierto ? `<b>${esc(h.especial ? (h.motivo || 'Festivo') : 'Cerrado')}</b> · no se pueden coger citas este día`
+    : `<b>${h.especial ? esc(h.motivo || 'Horario especial') : 'Horario'}</b> ${h.ap}–${h.ci}`;
+  const btn = rec ? `<button class="pill" onclick="abrirHorarioDia('${k}')">${!h.abierto ? 'Abrir este día' : 'Cambiar horario de este día'}</button>` : '';
+  return `<div class="${cls}"><span>${txt}</span>${btn}</div>`;
+}
+async function avisoCerrado(k) {
+  const h = horarioDe(k);
+  const txt = !h.abierto ? `El ${fechaLarga(k)} está cerrado${h.motivo ? ' (' + h.motivo + ')' : ''}.` : `Esa hora queda fuera del horario del ${fechaLarga(k)} (${h.ap}–${h.ci}).`;
+  if (!esRecepcion()) { toast(txt + ' Habla con recepción.'); return; }
+  if (await preguntar('Fuera de horario', txt + ' ¿Quieres cambiar el horario de ese día?', 'Cambiar horario', 'Cancelar')) abrirHorarioDia(k);
+}
+function sinTablasHorario() {
+  sheet(`<h3>Falta un paso en la base de datos</h3><p>Para usar horarios y festivos, ejecuta en Supabase → SQL Editor el archivo <b>actualizacion-1-horarios-y-ejemplos.sql</b> del repositorio.</p>
+    <div class="actions"><button class="primary" onclick="closeSheet()">Entendido</button></div>`);
+}
+async function abrirHorarioDia(k, volver = false) {
+  if (!S.horarioOK) return sinTablasHorario();
+  const e = S.especiales[k], base = S.horario[isoDia(k)];
+  const normal = base ? (base.abierto ? `${t5(base.apertura)}–${t5(base.cierre)}` : 'cerrado') : '—';
+  const modo = !e ? 'normal' : (e.abierto ? 'especial' : 'cerrado');
+  const a = startOf(k), b = startOf(addDays(k, 1));
+  const r = await sb.from('citas').select('id').eq('estado', 'confirmada').gte('inicio', a.toISOString()).lt('inicio', b.toISOString());
+  const n = (r.data || []).length;
+  sheet(`<h3 style="text-transform:none">${esc(fechaLarga(k))}</h3>
+    <p class="muted" style="margin:0">Horario habitual de este día de la semana (${NOMBRE_DIA[isoDia(k)].toLowerCase()}): <b>${normal}</b></p>
+    <div class="field"><span class="flabel">¿Cómo queda este día?</span><div class="seg" id="hd-seg">
+      <button type="button" data-m="normal" aria-pressed="${modo === 'normal'}">Horario habitual</button>
+      <button type="button" data-m="cerrado" aria-pressed="${modo === 'cerrado'}">Cerrado / festivo</button>
+      <button type="button" data-m="especial" aria-pressed="${modo === 'especial'}">Horario especial</button></div></div>
+    <div id="hd-cerrado" ${modo === 'cerrado' ? '' : 'hidden'}>
+      <div class="field"><label for="hd-motivo-c">Motivo</label><input id="hd-motivo-c" value="${esc(e && !e.abierto ? e.motivo || '' : '')}" placeholder="Festivo, vacaciones, formación…"></div>
+      ${n ? `<div class="box warnb">Hay <b>${n} ${n === 1 ? 'cita confirmada' : 'citas confirmadas'}</b> este día. No se anulan solas: revísalas en la agenda.</div>` : ''}
+    </div>
+    <div id="hd-especial" ${modo === 'especial' ? '' : 'hidden'}>
+      <div class="two"><div class="field"><label for="hd-ap">Abre</label><input id="hd-ap" type="time" step="900" value="${t5(e && e.abierto ? e.apertura : (base ? base.apertura : '09:00')) || '09:00'}"></div>
+        <div class="field"><label for="hd-ci">Cierra</label><input id="hd-ci" type="time" step="900" value="${t5(e && e.abierto ? e.cierre : (base && base.abierto ? base.cierre : '14:00')) || '14:00'}"></div></div>
+      <div class="field"><label for="hd-motivo-e">Motivo (opcional)</label><input id="hd-motivo-e" value="${esc(e && e.abierto ? e.motivo || '' : '')}" placeholder="Apertura especial, campaña de Navidad…"></div>
+      <p class="muted" style="font-size:13px;margin:8px 0 0">Sirve para abrir un día que normalmente está cerrado o para alargar el horario después del cierre.</p>
+    </div>
+    <div class="err" id="hd-err"></div>
+    <div class="actions"><button class="ghost" onclick="${volver ? 'pintarFormulario()' : 'closeSheet()'}">Cancelar</button><button class="primary" id="hd-save">Guardar</button></div>`);
+  let m = modo;
+  document.querySelectorAll('#hd-seg [data-m]').forEach(bt => bt.onclick = () => {
+    m = bt.dataset.m;
+    document.querySelectorAll('#hd-seg [data-m]').forEach(x => x.setAttribute('aria-pressed', x === bt));
+    $('#hd-cerrado').hidden = m !== 'cerrado'; $('#hd-especial').hidden = m !== 'especial';
+  });
+  $('#hd-save').onclick = () => guardarHorarioDia(k, m, volver);
+}
+async function guardarHorarioDia(k, m, volver) {
+  const err = $('#hd-err'); err.textContent = '';
+  let r;
+  if (m === 'normal') r = await sb.from('dias_especiales').delete().eq('fecha', k);
+  else if (m === 'cerrado') r = await sb.from('dias_especiales').upsert({ fecha: k, abierto: false, apertura: null, cierre: null, motivo: $('#hd-motivo-c').value.trim() || 'Festivo' });
+  else {
+    const ap = $('#hd-ap').value, ci = $('#hd-ci').value;
+    if (!ap || !ci || toMin(ci) <= toMin(ap)) { err.textContent = 'La hora de cierre debe ser posterior a la de apertura.'; return; }
+    r = await sb.from('dias_especiales').upsert({ fecha: k, abierto: true, apertura: ap, cierre: ci, motivo: $('#hd-motivo-e').value.trim() || 'Horario especial' });
+  }
+  if (r.error) { err.textContent = r.error.message; return; }
+  await cargarHorario();
+  if (volver && F) { pintarFormulario(); toast('Horario guardado. Ya puedes guardar la cita.'); return; }
+  closeSheet(); renderVista();
+  toast(m === 'normal' ? 'Ese día vuelve a su horario habitual' : m === 'cerrado' ? 'Día marcado como cerrado' : 'Horario especial guardado');
+}
+function nuevoDiaEspecial() {
+  if (!S.horarioOK) return sinTablasHorario();
+  sheet(`<h3>Festivo o día especial</h3>
+    <div class="field"><label for="nd-fecha">Fecha</label><input id="nd-fecha" type="date" value="${dkey(new Date())}"></div>
+    <div class="actions"><button class="ghost" onclick="closeSheet()">Cancelar</button><button class="primary" onclick="if($('#nd-fecha').value)abrirHorarioDia($('#nd-fecha').value)">Continuar</button></div>`);
+}
+function editarHorarioSemanal() {
+  if (!S.horarioOK) return sinTablasHorario();
+  sheet(`<h3>Horario semanal</h3><p class="muted" style="margin:0">Es el horario normal de cada día. Los festivos y cambios puntuales se ponen aparte.</p>
+    <div class="hsem">${[1, 2, 3, 4, 5, 6, 7].map(d => { const h = S.horario[d] || { abierto: d < 7, apertura: '09:00', cierre: d === 6 ? '14:00' : '21:00' }; return `
+      <div class="hrow"><label class="hday"><input type="checkbox" id="hs-on-${d}" ${h.abierto ? 'checked' : ''} onchange="document.querySelectorAll('.hrow-${d} input[type=time]').forEach(i=>i.disabled=!this.checked)">${NOMBRE_DIA[d]}</label>
+        <span class="hrow-${d}"><input type="time" step="900" id="hs-ap-${d}" value="${t5(h.apertura)}" ${h.abierto ? '' : 'disabled'} aria-label="${NOMBRE_DIA[d]} abre"> – <input type="time" step="900" id="hs-ci-${d}" value="${t5(h.cierre)}" ${h.abierto ? '' : 'disabled'} aria-label="${NOMBRE_DIA[d]} cierra"></span></div>`; }).join('')}</div>
+    <div class="err" id="hs-err"></div>
+    <div class="actions"><button class="ghost" onclick="closeSheet()">Cancelar</button><button class="primary" onclick="guardarHorarioSemanal()">Guardar</button></div>`);
+}
+async function guardarHorarioSemanal() {
+  const filas = [1, 2, 3, 4, 5, 6, 7].map(d => ({ dia: d, abierto: $('#hs-on-' + d).checked, apertura: $('#hs-ap-' + d).value || '09:00', cierre: $('#hs-ci-' + d).value || '21:00' }));
+  const mal = filas.find(f => toMin(f.cierre) <= toMin(f.apertura));
+  if (mal) { $('#hs-err').textContent = `${NOMBRE_DIA[mal.dia]}: la hora de cierre debe ser posterior a la de apertura.`; return; }
+  const r = await sb.from('horario_semanal').upsert(filas);
+  if (r.error) { $('#hs-err').textContent = r.error.message; return; }
+  await cargarHorario(); closeSheet(); renderVista(); toast('Horario semanal guardado');
+}
+function pascua(y) { // domingo de Pascua (calendario gregoriano)
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  return new Date(y, Math.floor((h + l - 7 * m + 114) / 31) - 1, ((h + l - 7 * m + 114) % 31) + 1, 12);
+}
+function festivosNacionalesDe(y) {
+  const vs = pascua(y); vs.setDate(vs.getDate() - 2);
+  return [[`${y}-01-01`, 'Año Nuevo'], [`${y}-01-06`, 'Epifanía del Señor'], [dkey(vs), 'Viernes Santo'], [`${y}-05-01`, 'Fiesta del Trabajo'],
+    [`${y}-08-15`, 'Asunción de la Virgen'], [`${y}-10-12`, 'Fiesta Nacional de España'], [`${y}-11-01`, 'Todos los Santos'],
+    [`${y}-12-06`, 'Día de la Constitución'], [`${y}-12-08`, 'Inmaculada Concepción'], [`${y}-12-25`, 'Navidad']];
+}
+async function festivosNacionales(y) {
+  if (!S.horarioOK) return sinTablasHorario();
+  const nuevos = festivosNacionalesDe(y).filter(([f]) => !S.especiales[f]);
+  if (!nuevos.length) { toast(`Los festivos nacionales de ${y} ya están añadidos`); return; }
+  const ok = await preguntar(`Festivos nacionales de ${y}`, `Se marcarán como cerrados ${nuevos.length} días: ${nuevos.map(([f, n]) => fechaCorta(f + 'T12:00') + ' ' + n).join(', ')}. Los autonómicos y locales añádelos a mano.`, 'Añadir', 'Cancelar');
+  if (!ok) return;
+  const r = await sb.from('dias_especiales').insert(nuevos.map(([f, n]) => ({ fecha: f, abierto: false, motivo: n })));
+  if (r.error) { toast(r.error.message); return; }
+  await cargarHorario(); renderVista(); toast(`${nuevos.length} festivos añadidos`);
+}
+function seccionHorario() {
+  if (!S.horarioOK) return `<div class="sect">Horario y festivos</div><div class="box warnb" style="margin-top:0">Para activar el horario semanal y los festivos, ejecuta en Supabase → SQL Editor el archivo <b>actualizacion-1-horarios-y-ejemplos.sql</b> del repositorio.</div>`;
+  const hoy = dkey(new Date()), y = new Date().getFullYear();
+  const prox = Object.values(S.especiales).filter(e => e.fecha >= hoy).sort((a, b) => a.fecha.localeCompare(b.fecha));
+  return `<div class="sect">Horario semanal<button class="pill" onclick="editarHorarioSemanal()">Editar</button></div>
+  <div class="list hlist">${[1, 2, 3, 4, 5, 6, 7].map(d => { const h = S.horario[d]; return `<div class="row"><span class="main"><b>${NOMBRE_DIA[d]}</b></span><span class="end ${h && h.abierto ? '' : 'muted'}">${h ? (h.abierto ? `${t5(h.apertura)}–${t5(h.cierre)}` : 'Cerrado') : '—'}</span></div>`; }).join('')}</div>
+  <div class="sect">Festivos y días especiales<button class="pill" onclick="nuevoDiaEspecial()">+ Día</button></div>
+  <div class="list">${prox.slice(0, 40).map(e => `<button class="row" onclick="abrirHorarioDia('${e.fecha}')"><span class="main"><b class="cap">${esc(fechaLarga(e.fecha))}</b><small>${esc(e.motivo || '')}</small></span><span class="end ${e.abierto ? 'ok' : 'bad'}">${e.abierto ? `Abierto ${t5(e.apertura)}–${t5(e.cierre)}` : 'Cerrado'}</span></button>`).join('') || '<p class="row muted">No hay festivos ni días especiales próximos.</p>'}</div>
+  <div class="actions"><button class="ghost" onclick="festivosNacionales(${y})">Festivos nacionales ${y}</button><button class="ghost" onclick="festivosNacionales(${y + 1})">Festivos nacionales ${y + 1}</button></div>
+  <p class="note">Los festivos autonómicos y locales se añaden con «+ Día». Desde la agenda también puedes abrir o cerrar un día concreto, o alargar su horario.</p>`;
+}
+
+
+/* ================= bloqueos de trabajador ================= */
+function bloqueosDe(tid, k) {
+  const a = startOf(k), b = startOf(addDays(k, 1));
+  return (S.bloqueos || []).filter(x => (!tid || x.trabajador_id === tid) && new Date(x.inicio) < b && new Date(x.fin) > a);
+}
+function bloqueoEn(tid, k, m0, m1) {
+  const ini = new Date(startOf(k).getTime() + m0 * 60000), fin = new Date(startOf(k).getTime() + m1 * 60000);
+  return (S.bloqueos || []).find(x => x.trabajador_id === tid && new Date(x.inicio) < fin && new Date(x.fin) > ini);
+}
+function textoBloqueo(x) {
+  const i = new Date(x.inicio), f = new Date(x.fin), dia = startOf(dkey(i));
+  const todoDia = i.getTime() === dia.getTime() && (f - i) % 864e5 === 0;
+  if (todoDia) { const dias = Math.round((f - i) / 864e5); return dias === 1 ? `${fechaLarga(dkey(i))} · todo el día` : `${fechaCorta(i)} – ${fechaCorta(new Date(f - 1))} · ${dias} días`; }
+  return dkey(i) === dkey(new Date(f - 1)) ? `${fechaLarga(dkey(i))} · ${hhmm(i)}–${hhmm(f)}` : `${fechaCorta(i)} ${hhmm(i)} – ${fechaCorta(f)} ${hhmm(f)}`;
+}
+// franjas bloqueadas sobre una columna de la agenda
+function capasBloqueo(lista, k, OPEN, CLOSE, conNombre = false) {
+  const base = startOf(k).getTime();
+  return lista.map(x => {
+    const m0 = Math.max(OPEN, Math.round((new Date(x.inicio).getTime() - base) / 60000));
+    const m1 = Math.min(CLOSE, Math.round((new Date(x.fin).getTime() - base) / 60000));
+    if (m1 <= m0) return '';
+    return `<button class="bloq" style="top:${(m0 - OPEN) / 15 * PX}px;height:${(m1 - m0) / 15 * PX}px" onclick="event.stopPropagation();abrirBloqueo('${x.id}')">
+      <span>${conNombre ? esc(trab(x.trabajador_id).nombre) + ' · ' : ''}Bloqueado${x.motivo ? ' · ' + esc(x.motivo) : ''}</span></button>`;
+  }).join('');
+}
+function nuevoBloqueo(pre = {}) {
+  if (!S.bloqueosOK) return sheet(`<h3>Falta un paso en la base de datos</h3><p>Para bloquear horas, ejecuta en Supabase → SQL Editor el archivo <b>actualizacion-1-horarios-y-ejemplos.sql</b> del repositorio.</p><div class="actions"><button class="primary" onclick="closeSheet()">Entendido</button></div>`);
+  const tid = esRecepcion() ? (pre.trabajador_id || S.filtroTrab || '') : S.meId;
+  const k = pre.fecha || S.day, h = horarioDe(k);
+  sheet(`<h3>Bloquear horas</h3>
+    <p class="muted" style="margin:0">${esRecepcion() ? 'Durante ese tiempo no se podrán dar citas a esta persona.' : 'Durante ese tiempo nadie podrá darte citas, tampoco recepción.'}</p>
+    ${esRecepcion() ? `<div class="field"><label for="bq-trab">Trabajador</label><select id="bq-trab">${S.trabajadores.filter(t => t.activo).map(t => `<option value="${t.id}" ${t.id === tid ? 'selected' : ''}>${esc(t.nombre)}</option>`).join('')}</select></div>` : ''}
+    <div class="two"><div class="field"><label for="bq-desde">Desde el día</label><input id="bq-desde" type="date" value="${k}"></div>
+      <div class="field"><label for="bq-hasta">Hasta el día</label><input id="bq-hasta" type="date" value="${k}"></div></div>
+    <label class="switch"><span><b>Todo el día</b><br><small class="muted">Desmárcalo para bloquear solo unas horas.</small></span><input type="checkbox" id="bq-todo" ${pre.hora ? '' : 'checked'}></label>
+    <div class="two" id="bq-horas" ${pre.hora ? '' : 'hidden'}><div class="field"><label for="bq-ini">De</label><input id="bq-ini" type="time" step="900" value="${pre.hora || (h.abierto ? h.ap : '09:00')}"></div>
+      <div class="field"><label for="bq-fin">A</label><input id="bq-fin" type="time" step="900" value="${pre.hora ? minToT(Math.min(toMin(pre.hora) + 120, 1439)) : (h.abierto ? h.ci : '14:00')}"></div></div>
+    <div class="field"><label for="bq-motivo">Motivo (opcional)</label><input id="bq-motivo" placeholder="Asuntos propios, formación, vacaciones…"></div>
+    <p class="muted" style="font-size:13px;margin:8px 0 0">El motivo lo ve recepción. No pongas datos de salud.</p>
+    <div class="err" id="bq-err"></div>
+    <div class="actions"><button class="ghost" onclick="closeSheet()">Cancelar</button><button class="primary" id="bq-save" onclick="guardarBloqueo()">Bloquear</button></div>`);
+  $('#bq-todo').onchange = e => { $('#bq-horas').hidden = e.target.checked; };
+  $('#bq-desde').onchange = e => { if ($('#bq-hasta').value < e.target.value) $('#bq-hasta').value = e.target.value; };
+}
+async function guardarBloqueo() {
+  const err = $('#bq-err'); err.textContent = '';
+  const tid = esRecepcion() ? $('#bq-trab').value : S.meId, desde = $('#bq-desde').value, hasta = $('#bq-hasta').value || desde;
+  const todo = $('#bq-todo').checked, ini = $('#bq-ini').value, fin = $('#bq-fin').value, motivo = $('#bq-motivo').value.trim() || null;
+  if (!tid) { err.textContent = 'Elige el trabajador.'; return; }
+  if (!desde || hasta < desde) { err.textContent = 'Revisa las fechas: «hasta» no puede ser anterior a «desde».'; return; }
+  if (!todo && (!ini || !fin || toMin(fin) <= toMin(ini))) { err.textContent = 'La hora final debe ser posterior a la inicial.'; return; }
+  const filas = [];
+  if (todo) filas.push({ trabajador_id: tid, inicio: startOf(desde).toISOString(), fin: startOf(addDays(hasta, 1)).toISOString(), motivo });
+  else for (let k = desde; k <= hasta; k = addDays(k, 1)) filas.push({ trabajador_id: tid, inicio: new Date(k + 'T' + ini).toISOString(), fin: new Date(k + 'T' + fin).toISOString(), motivo });
+  if (filas.length > 120) { err.textContent = 'Como máximo 120 días de una vez.'; return; }
+  // ¿hay citas ya dadas en ese tiempo?
+  const r0 = await sb.from('citas').select('id,inicio,fin').eq('trabajador_id', tid).eq('estado', 'confirmada').lt('inicio', filas[filas.length - 1].fin).gt('fin', filas[0].inicio);
+  const choc = (r0.data || []).filter(c => filas.some(f => new Date(c.inicio) < new Date(f.fin) && new Date(c.fin) > new Date(f.inicio)));
+  if (choc.length && !(await preguntar('Hay citas en ese tiempo', `${choc.length === 1 ? 'Hay 1 cita confirmada' : `Hay ${choc.length} citas confirmadas`} en ese tiempo. El bloqueo no las anula: ${esRecepcion() ? 'tendrás que moverlas o anularlas' : 'avisa a recepción para moverlas'}. ¿Bloquear igualmente?`, 'Bloquear', 'Cancelar'))) return;
+  const r = await sb.from('bloqueos').insert(filas);
+  if (r.error) { err.textContent = traducirError(r.error); return; }
+  closeSheet(); await cargarDia(); renderVista();
+  toast(esRecepcion() ? `Tiempo bloqueado para ${trab(tid).nombre}` : 'Tiempo bloqueado. Recepción ya no podrá darte citas en ese hueco.');
+}
+async function abrirBloqueo(id) {
+  const x = (S.bloqueos || []).find(b => b.id === id); if (!x) return;
+  const puede = esRecepcion() || x.trabajador_id === S.meId;
+  sheet(`<h3>Tiempo bloqueado</h3>
+    <dl class="kv"><dt>Quién</dt><dd>${esc(trab(x.trabajador_id).nombre)}</dd><dt>Cuándo</dt><dd style="text-transform:none">${esc(textoBloqueo(x))}</dd>${x.motivo ? `<dt>Motivo</dt><dd>${esc(x.motivo)}</dd>` : ''}</dl>
+    <p class="muted" style="font-size:13px">En este tiempo no se pueden dar citas a ${x.trabajador_id === S.meId ? 'ti' : 'esta persona'}.</p>
+    <div class="actions"><button class="ghost" onclick="closeSheet()">Cerrar</button>${puede ? `<button class="danger" onclick="quitarBloqueo('${x.id}')">Quitar bloqueo</button>` : ''}</div>`);
+}
+async function quitarBloqueo(id) {
+  const r = await sb.from('bloqueos').delete().eq('id', id);
+  if (r.error) { toast(r.error.message); return; }
+  closeSheet(); await cargarDia(); renderVista(); toast('Bloqueo quitado');
 }
 
 /* ================= ficha de cita ================= */
@@ -689,6 +949,8 @@ async function conSolape(run) {
 function traducirError(e) {
   const m = (e && e.message) || '';
   if (m.includes('trabajador_ocupado')) return 'Esa persona ya tiene otra cita a esa hora.';
+  if (m.includes('TRABAJADOR_BLOQUEADO')) { const [, quien, motivo, cuando] = m.slice(m.indexOf('TRABAJADOR_BLOQUEADO')).split('|'); return `${quien} tiene ese tiempo bloqueado${motivo ? ' (' + motivo + ')' : ''}: ${cuando}.`; }
+  if (m.includes('FUERA_HORARIO')) { const [, tipo, info] = m.slice(m.indexOf('FUERA_HORARIO')).split('|'); return tipo === 'cerrado' ? `El centro está cerrado ese día${info ? ' (' + info + ')' : ''}. Recepción puede abrirlo desde la agenda.` : `La cita se sale del horario de ese día (${info}).`; }
   if (/row-level security/i.test(m)) return 'No tienes permiso para hacer este cambio.';
   if (m.includes('fin > inicio') || m.includes('citas_check')) return 'La hora de fin debe ser posterior al inicio.';
   return m || 'No se ha podido guardar.';
@@ -696,8 +958,9 @@ function traducirError(e) {
 
 /* ================= formulario de cita ================= */
 let F = null; // estado del formulario
-function opcionesHora(sel) {
-  const OPEN = toMin(S.ajustes.hora_apertura || '09:00'), CLOSE = toMin(S.ajustes.hora_cierre || '21:00');
+function opcionesHora(sel, fecha) {
+  const h = horarioDe(fecha || S.day);
+  const [OPEN, CLOSE] = h.abierto ? [toMin(h.ap), toMin(h.ci)] : limites([fecha || S.day]);
   let o = ''; for (let m = OPEN; m < CLOSE; m += 15) { const t = minToT(m); o += `<option ${t === sel ? 'selected' : ''}>${t}</option>`; }
   if (sel && !o.includes(`>${sel}<`)) o = `<option selected>${sel}</option>` + o;
   return o;
@@ -743,7 +1006,8 @@ function pintarFormulario() {
   const s = srv(F.servicioId);
   sheet(`<h3>${F.id ? 'Editar cita' : 'Nueva cita'}</h3>
     <div class="two"><div class="field"><label for="f-fecha">Fecha</label><input id="f-fecha" type="date" value="${F.fecha}"></div>
-      <div class="field"><label for="f-hora">Hora</label><select id="f-hora">${opcionesHora(F.hora)}</select></div></div>
+      <div class="field"><label for="f-hora">Hora</label><select id="f-hora">${opcionesHora(F.hora, F.fecha)}</select></div></div>
+    <p class="hint ${horarioDe(F.fecha).abierto ? '' : 'bad'}">Horario de ese día: ${esc(textoHorario(F.fecha))}${!horarioDe(F.fecha).abierto && esRecepcion() ? ` · <button type="button" class="linkbtn" onclick="leerForm();abrirHorarioDia('${F.fecha}',true)">Abrir ese día</button>` : ''}</p>
     <div class="field"><label for="f-act">Actividad</label><select id="f-act">${acts.map(a => `<option value="${a.id}" ${a.id === F.actId ? 'selected' : ''}>${esc(a.nombre)}</option>`).join('')}</select></div>
     <div class="field"><label for="f-srv">Servicio</label><select id="f-srv">${servs.map(x => `<option value="${x.id}" ${x.id === F.servicioId ? 'selected' : ''}>${esc(x.nombre)} · ${x.duracion_min} min${S.puedeFacturar && S.precios[x.id] != null ? ' · ' + eur(S.precios[x.id]) : ''}</option>`).join('') || '<option value="">No hay servicios en esta actividad</option>'}</select></div>
     ${esRecepcion() ? `<div class="field"><label for="f-trab">Trabajador</label><select id="f-trab">${trabs.map(t => `<option value="${t.id}" ${t.id === F.trabajadorId ? 'selected' : ''}>${esc(t.nombre)}</option>`).join('')}</select></div>` : ''}
@@ -756,12 +1020,14 @@ function pintarFormulario() {
     <div class="err" id="f-err"></div>
     <div class="actions"><button class="ghost" onclick="closeSheet()">Cancelar</button><button class="primary" id="f-save" onclick="guardarCita()">Guardar cita</button></div>`);
   pintarCliente();
-  const leer = () => { F.fecha = $('#f-fecha').value; F.hora = $('#f-hora').value; F.notas = $('#f-notas').value; F.cabinaId = $('#f-cab').value; };
+  const leer = leerForm;
   $('#f-act').onchange = e => { leer(); F.actId = e.target.value; F.servicioId = ''; if (esRecepcion() && !trabajadoresDe(F.actId).some(t => t.id === F.trabajadorId)) { F.trabajadorId = ''; F.cabinaId = ''; } pintarFormulario(); };
   $('#f-srv').onchange = e => { leer(); F.servicioId = e.target.value; $('#f-fin').textContent = calcFin(F.hora, srv(F.servicioId).duracion_min); };
+  $('#f-fecha').onchange = () => { leer(); pintarFormulario(); };
   $('#f-hora').onchange = () => { leer(); $('#f-fin').textContent = calcFin(F.hora, srv(F.servicioId).duracion_min); };
   if ($('#f-trab')) $('#f-trab').onchange = e => { leer(); F.trabajadorId = e.target.value; F.cabinaId = cabinaPorDefecto(F.trabajadorId); pintarFormulario(); };
 }
+function leerForm() { if (!$('#f-fecha')) return; F.fecha = $('#f-fecha').value || F.fecha; F.hora = $('#f-hora').value; F.notas = $('#f-notas').value; F.cabinaId = $('#f-cab').value; if ($('#f-srv')) F.servicioId = $('#f-srv').value; if ($('#f-trab')) F.trabajadorId = $('#f-trab').value; }
 function calcFin(h, dur) { return minToT((toMin(h) + (+dur || 30)) % 1440); }
 function pintarCliente() {
   const box = $('#f-cli-box'); if (!box) return;
@@ -795,6 +1061,15 @@ async function guardarCita() {
   if (!F.fecha || !F.hora) { err.textContent = 'Elige fecha y hora.'; return; }
   if (!F.servicioId) { err.textContent = 'Elige un servicio. Si no hay, créalo en Ajustes.'; return; }
   if (!F.trabajadorId) { err.textContent = 'Elige quién atiende la cita.'; return; }
+  { const m0 = toMin(F.hora), m1 = m0 + (srv(F.servicioId).duracion_min || 30);
+    if (fueraDeHorario(F.fecha, m0, m1)) {
+      const h = horarioDe(F.fecha);
+      err.innerHTML = esc(!h.abierto ? `Ese día está cerrado${h.motivo ? ' (' + h.motivo + ')' : ''}.` : `La cita se sale del horario de ese día (${h.ap}–${h.ci}).`)
+        + (esRecepcion() ? ` <button class="linkbtn" type="button" onclick="leerForm();abrirHorarioDia('${F.fecha}',true)">Cambiar horario de ese día</button>` : ' Habla con recepción.');
+      return;
+    }
+    const bq = bloqueoEn(F.trabajadorId, F.fecha, m0, m1);
+    if (bq) { err.textContent = `${F.trabajadorId === S.meId ? 'Tienes' : trab(F.trabajadorId).nombre + ' tiene'} ese tiempo bloqueado${bq.motivo ? ' (' + bq.motivo + ')' : ''}: ${textoBloqueo(bq)}.`; return; } }
   if (!F.cliente && !F.creandoCliente) { err.textContent = 'Busca o crea el cliente.'; return; }
   const btn = $('#f-save'); btn.disabled = true; btn.textContent = 'Guardando…';
   const fin = () => { btn.disabled = false; btn.textContent = 'Guardar cita'; };
@@ -944,7 +1219,8 @@ async function cargarVinculados() {
 function vistaAjustes() {
   const A = S.ajustes;
   return `<div class="sect">Centro<button class="pill" onclick="editarCentro()">Editar</button></div>
-  <div class="list"><div class="row"><span class="main"><b>${esc(A.nombre_centro)}</b><small>${esc([A.telefono, A.direccion].filter(Boolean).join(' · ') || 'Sin teléfono ni dirección')} · Horario ${String(A.hora_apertura).slice(0, 5)}–${String(A.hora_cierre).slice(0, 5)}</small></span></div></div>
+  <div class="list"><div class="row"><span class="main"><b>${esc(A.nombre_centro)}</b><small>${esc([A.telefono, A.direccion].filter(Boolean).join(' · ') || 'Sin teléfono ni dirección')}</small></span></div></div>
+  ${seccionHorario()}
 
   <div class="sect">Equipo<button class="pill" onclick="editarTrabajador()">+ Trabajador</button></div>
   <div class="list">${S.trabajadores.map(t => `<button class="row" onclick="editarTrabajador('${t.id}')"><span class="avatar">${esc(iniciales(t.nombre))}</span><span class="main"><b>${esc(t.nombre)}${t.activo ? '' : ' <small class="muted">(de baja)</small>'}</b><small>${esc(t.email || 'Sin email: no podrá entrar en la app')}</small>
@@ -976,15 +1252,12 @@ function editarCentro() {
     <div class="field"><label for="a-nombre">Nombre del centro</label><input id="a-nombre" value="${esc(A.nombre_centro)}"></div>
     <div class="two"><div class="field"><label for="a-tel">Teléfono</label><input id="a-tel" value="${esc(A.telefono || '')}"></div>
       <div class="field"><label for="a-dir">Dirección</label><input id="a-dir" value="${esc(A.direccion || '')}"></div></div>
-    <div class="two"><div class="field"><label for="a-ab">Abre</label><input id="a-ab" type="time" step="900" value="${String(A.hora_apertura).slice(0, 5)}"></div>
-      <div class="field"><label for="a-ci">Cierra</label><input id="a-ci" type="time" step="900" value="${String(A.hora_cierre).slice(0, 5)}"></div></div>
     <p class="muted" style="font-size:13px">El nombre, teléfono y dirección aparecen en los recordatorios que se envían a los clientes.</p>
     <div class="err" id="a-err"></div>
     <div class="actions"><button class="ghost" onclick="closeSheet()">Cancelar</button><button class="primary" onclick="guardarCentro()">Guardar</button></div>`);
 }
 async function guardarCentro() {
-  const d = { id: 1, nombre_centro: $('#a-nombre').value.trim() || 'Mi centro', telefono: $('#a-tel').value.trim() || null, direccion: $('#a-dir').value.trim() || null, hora_apertura: $('#a-ab').value || '09:00', hora_cierre: $('#a-ci').value || '21:00' };
-  if (toMin(d.hora_cierre) <= toMin(d.hora_apertura)) { $('#a-err').textContent = 'La hora de cierre debe ser posterior a la de apertura.'; return; }
+  const d = { id: 1, nombre_centro: $('#a-nombre').value.trim() || 'Mi centro', telefono: $('#a-tel').value.trim() || null, direccion: $('#a-dir').value.trim() || null };
   const r = await sb.from('ajustes').upsert(d).select().single();
   if (r.error) { $('#a-err').textContent = r.error.message; return; }
   S.ajustes = r.data; closeSheet(); render(); toast('Datos del centro guardados');
