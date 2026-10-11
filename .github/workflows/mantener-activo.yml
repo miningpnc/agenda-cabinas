@@ -1,0 +1,21 @@
+# Mantiene despierta la base de datos: el plan gratuito la pausa tras una semana sin uso.
+# Cada 3 días hace una consulta mínima (con la clave pública, la misma que usa la web).
+# Se puede lanzar a mano en la pestaña «Actions» → «Mantener activa la base de datos» → «Run workflow».
+name: Mantener activa la base de datos
+on:
+  schedule:
+    - cron: '17 6 */3 * *'
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Consultar la base de datos
+        run: |
+          URL=$(grep -oE "supabaseUrl: *'[^']+'" config.js | cut -d"'" -f2)
+          KEY=$(grep -oE "supabaseKey: *'[^']+'" config.js | cut -d"'" -f2)
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$URL/rest/v1/rpc/mantener_activo" \
+            -H "apikey: $KEY" -H "Content-Type: application/json" -d '{}')
+          echo "Respuesta: $code"
+          test "$code" = "200" || curl -s -o /dev/null -w 'Respaldo: %{http_code}\n' "$URL/rest/v1/servicios?select=id&limit=1" -H "apikey: $KEY"

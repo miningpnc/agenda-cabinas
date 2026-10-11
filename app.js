@@ -212,6 +212,10 @@ function pantallaDemo(aviso = '') {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5"/></svg>
         <span><b>Entrar como Trabajador${(CFG.demo && CFG.demo.trabajador && CFG.demo.trabajador.nombre) ? ' · ' + esc(CFG.demo.trabajador.nombre) : ''}</b><small>Profesional: solo sus citas y los servicios de sus actividades, sus avisos y, si es autónomo, su propia facturación.</small></span>
       </button>
+      ${CFG.demo && CFG.demo.propietario ? `<button class="role" id="d-propietario" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 20h18"/><path d="M4 16l5-5 4 3 7-8"/><path d="M16 6h4v4"/></svg>
+        <span><b>Entrar como Dirección</b><small>Propietario: todo lo de recepción y, además, estadísticas con gráficas e informes de facturación.</small></span>
+      </button>` : ''}
     </div>
     <div class="err" id="d-err" ${aviso ? '' : 'hidden'}>${esc(aviso)}</div>
     <div class="secure">
@@ -221,10 +225,10 @@ function pantallaDemo(aviso = '') {
         <li>Cada persona entra con <b>su email y su contraseña</b>. Sin ellos no se ve ningún dato, ni siquiera desde esta web.</li>
         <li>El alta se <b>valida por correo electrónico</b>: nadie accede hasta confirmar su email, y solo si el centro le ha dado de alta.</li>
         <li>Los datos se guardan <b>cifrados en servidores de la Unión Europea</b>.</li>
-        <li>Cada uno ve <b>solo lo que le corresponde</b>: recepción, todo; cada profesional, sus citas.</li>
+        <li>Cada uno ve <b>solo lo que le corresponde</b>: dirección, todo y las estadísticas; recepción, la agenda del centro; cada profesional, sus citas.</li>
         <li>No se guarda historia clínica: eso sigue en el programa de pacientes del centro.</li>
       </ul>
-      <p>Esta demo funciona sobre la misma base de datos y los mismos permisos reales. Los botones solo rellenan por ti el email y la contraseña de dos cuentas de prueba con datos inventados.</p></div>
+      <p>Esta demo funciona sobre la misma base de datos y los mismos permisos reales. Los botones solo rellenan por ti el email y la contraseña de cuentas de prueba con datos inventados.</p></div>
     </div>
     <p style="text-align:center;margin:14px 0 0"><button type="button" class="pill" id="d-manual">Entrar con mi email y contraseña</button></p>
   </div></div>`;
@@ -245,6 +249,7 @@ function pantallaDemo(aviso = '') {
   };
   $('#d-recepcion').onclick = e => entrar('recepcion', e.currentTarget);
   $('#d-trabajador').onclick = e => entrar('trabajador', e.currentTarget);
+  if ($('#d-propietario')) $('#d-propietario').onclick = e => entrar('propietario', e.currentTarget);
   $('#d-manual').onclick = () => pantallaLogin('entrar');
 }
 
@@ -351,10 +356,10 @@ function pantallaSinPerfil() {
 
 async function iniciarApp() {
   $('#app').innerHTML = '<div class="spinner" aria-label="Cargando"></div>';
-  const { data: p, error } = await sb.from('perfiles').select('rol,trabajador_id').eq('user_id', S.user.id).maybeSingle();
+  const { data: p, error } = await sb.from('perfiles').select('*').eq('user_id', S.user.id).maybeSingle();
   if (error) return pantallaError(error.message);
   if (!p) return pantallaSinPerfil();
-  S.rol = p.rol; S.meId = p.trabajador_id;
+  S.rol = p.rol; S.meId = p.trabajador_id; S.propietario = !!p.propietario;
   try { await cargarBase(); } catch (e) { return pantallaError(e.message || String(e)); }
   S.puedeFacturar = esRecepcion() || !!(yo() && yo().ver_facturacion);
   await Promise.all([cargarDia(), cargarAvisos()]);
@@ -365,6 +370,16 @@ async function iniciarApp() {
 }
 
 /* ================= datos ================= */
+// La base devuelve como mucho 1000 filas por consulta: se piden por tandas hasta tenerlas todas
+async function todasLasFilas(consulta) {
+  const out = [];
+  for (let i = 0; ; i += 1000) {
+    const r = await consulta().range(i, i + 999);
+    if (r.error) return { data: out, error: r.error };
+    out.push(...(r.data || []));
+    if (!r.data || r.data.length < 1000 || i > 60000) return { data: out, error: null };
+  }
+}
 function chk(r) { if (r.error) throw new Error(r.error.message); return r.data || []; }
 async function cargarBase() {
   const [aj, ac, tr, ta, cb, tc, sv, pr, cl] = await Promise.all([
@@ -376,7 +391,7 @@ async function cargarBase() {
     sb.from('trabajador_cabinas').select('*'),
     sb.from('servicios').select('*').order('nombre'),
     sb.from('precios').select('*'),
-    sb.from('clientes').select('*').order('nombre')
+    todasLasFilas(() => sb.from('clientes').select('*').order('nombre').order('id'))
   ]);
   if (aj.error) throw new Error(aj.error.message);
   S.ajustes = aj.data || { nombre_centro: 'Mi centro', hora_apertura: '09:00', hora_cierre: '21:00' };
@@ -392,12 +407,12 @@ async function cargarHistorial() {
   const r = await sb.rpc('historial_clientes');
   if (!r.error) (r.data || []).forEach(h => S.hist[h.cliente_id] = h);
 }
-async function cargarClientes() { const r = await sb.from('clientes').select('*').order('nombre'); if (!r.error) S.clientes = r.data.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')); }
+async function cargarClientes() { const r = await todasLasFilas(() => sb.from('clientes').select('*').order('nombre').order('id')); if (!r.error) S.clientes = r.data.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')); }
 async function cargarDia() {
   const { a, b } = rangoAgenda();
   const campos = S.vista === 'anio' ? 'id,inicio,fin,estado,trabajador_id,servicio_id,cabina_id,cliente_id' + (hayPrecioLibre() ? ',precio,concepto' : '') : '*';
   const [c, ch] = await Promise.all([
-    sb.from('citas').select(campos).gte('inicio', a.toISOString()).lt('inicio', b.toISOString()).order('inicio').limit(5000),
+    todasLasFilas(() => sb.from('citas').select(campos).gte('inicio', a.toISOString()).lt('inicio', b.toISOString()).order('inicio').order('id')),
     sb.rpc('citas_con_choque', { p_desde: a.toISOString(), p_hasta: b.toISOString() }),
     sb.from('bloqueos').select('*').lt('inicio', b.toISOString()).gt('fin', a.toISOString())
   ]).then(r => { S.bloqueosOK = !r[2].error; S.bloqueos = r[2].error ? [] : r[2].data; return r; });
@@ -563,7 +578,7 @@ const FRASES_FESTIVO = [
   ['Un día distinto merece un ánimo distinto: hoy toca brillar.', 'Hoy es festivo']
 ];
 function saludo() { const h = new Date().getHours(); return h >= 6 && h < 14 ? 'Buenos días' : h >= 14 && h < 21 ? 'Buenas tardes' : 'Buenas noches'; }
-function nombreSaludo() { if (esRecepcion()) return 'Recepción'; return (yo()?.nombre || '').split(' ')[0]; }
+function nombreSaludo() { if (esRecepcion()) return S.propietario ? 'Dirección' : 'Recepción'; return (yo()?.nombre || '').split(' ')[0]; }
 // saca frases de una "bolsa" barajada: no se repite ninguna hasta que han salido todas
 function deLaBolsa(clave, n) {
   let bolsa = [];
@@ -599,11 +614,14 @@ const ICONOS = {
   clientes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5"/></svg>',
   facturacion: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
   ajustes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>',
+  estadisticas: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 20h18"/><path d="M4 16l5-5 4 3 7-8"/><path d="M16 6h4v4"/></svg>',
   cuenta: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="10" r="3"/><path d="M6.5 18c1.4-2 3.3-3 5.5-3s4.1 1 5.5 3"/></svg>'
 };
 const BELL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>';
+function logoCentro() { return S.ajustes && S.ajustes.logo ? `<div class="logo foto"><img src="${esc(S.ajustes.logo)}" alt=""></div>` : `<div class="logo">${LOGO}</div>`; }
 function pestañas() {
-  if (esRecepcion()) return [['agenda', 'Agenda'], ['clientes', 'Clientes'], ['facturacion', 'Facturación'], ['ajustes', 'Ajustes']];
+  if (esRecepcion()) return S.propietario ? [['agenda', 'Agenda'], ['clientes', 'Clientes'], ['facturacion', 'Facturación'], ['estadisticas', 'Estadísticas'], ['ajustes', 'Ajustes']]
+    : [['agenda', 'Agenda'], ['clientes', 'Clientes'], ['facturacion', 'Facturación'], ['ajustes', 'Ajustes']];
   const t = [['agenda', 'Mis citas'], ['clientes', 'Mis clientes']];
   if (S.puedeFacturar) t.push(['facturacion', 'Facturación']);
   t.push(['cuenta', 'Cuenta']);
@@ -611,8 +629,8 @@ function pestañas() {
 }
 function render() {
   $('#app').innerHTML = `<div class="wrap">
-    <header class="top"><div class="logo">${LOGO}</div>
-      <div class="t"><h1>${S.cumple ? '¡Feliz cumpleaños, ' + esc(nombreSaludo()) + '!' : saludo() + (nombreSaludo() ? ', ' + esc(nombreSaludo()) : '')}</h1><small>${esc(S.ajustes.nombre_centro || 'Mi centro')}${esRecepcion() ? ' · Recepción' : ''}${DEMO ? ' · <span class="demo-tag">Demo</span>' : ''}</small></div>
+    <header class="top">${logoCentro()}
+      <div class="t"><h1>${S.cumple ? '¡Feliz cumpleaños, ' + esc(nombreSaludo()) + '!' : saludo() + (nombreSaludo() ? ', ' + esc(nombreSaludo()) : '')}</h1><small>${esc(S.ajustes.nombre_centro || 'Mi centro')}${esRecepcion() ? (S.propietario ? ' · Dirección' : ' · Recepción') : ''}${DEMO ? ' · <span class="demo-tag">Demo</span>' : ''}</small></div>
       <button class="bell" id="bell" aria-label="Avisos" onclick="abrirAvisos()">${BELL}<b id="bell-n" hidden></b></button>
     </header>
     ${S.frase ? (S.frase[2] ? `<p class="frase especial ${S.frase[2]}">${esc(S.frase[0])} <span>— ${esc(S.frase[1])}</span></p>` : `<p class="frase">«${esc(S.frase[0])}» <span>— ${esc(S.frase[1])}</span></p>`) : ''}
@@ -623,9 +641,10 @@ function render() {
 function irA(t) { S.tab = t; closeSheet(); render(); window.scrollTo(0, 0); }
 function renderVista() {
   const v = $('#view'); if (!v) return;
-  const f = { agenda: vistaAgenda, clientes: vistaClientes, facturacion: vistaFacturacion, ajustes: vistaAjustes, cuenta: vistaCuenta }[S.tab] || vistaAgenda;
+  const f = { agenda: vistaAgenda, clientes: vistaClientes, facturacion: vistaFacturacion, estadisticas: vistaEstadisticas, ajustes: vistaAjustes, cuenta: vistaCuenta }[S.tab] || vistaAgenda;
   v.innerHTML = f();
   if (S.tab === 'facturacion') cargarFacturacion();
+  if (S.tab === 'estadisticas') cargarEstadisticas();
   if (S.tab === 'ajustes') cargarVinculados();
 }
 function pintarCampana() {
@@ -1109,7 +1128,9 @@ async function abrirCita(id, idiomaMsg) {
       <textarea id="rem" class="msg">${esc(recordatorio(c, lang))}</textarea>
       <div class="actions" style="margin-top:6px"><button class="ghost" onclick="copiar('rem')">Copiar mensaje</button></div></div>` : ''}
     <div class="actions"><button class="ghost" onclick="closeSheet()">Cerrar</button><button class="primary" onclick="editarCita('${c.id}')">Editar cita</button></div>
-    ${esRecepcion() && c.cliente_id ? `<div class="actions" style="margin-top:8px"><button class="ghost" onclick="abrirCliente('${c.cliente_id}')">Ver ficha del cliente</button></div>` : ''}`);
+    ${esRecepcion() && c.cliente_id ? `<div class="actions" style="margin-top:8px"><button class="ghost" onclick="abrirCliente('${c.cliente_id}')">Ver ficha del cliente</button></div>` : ''}
+    <div id="cita-cambios"></div>`);
+  pintarCambiosCita(c.id);
 }
 async function editarCita(id) { const c = await obtenerCita(id); if (c) abrirFormulario(c); }
 async function recibido(id, reabrir = true) {
@@ -1595,7 +1616,7 @@ function hojaConsentimiento(c, op = {}) {
   const pobl = A.poblacion || (A.direccion || '').split(',').pop().trim() || '______________';
   const fila = (k, v) => `<tr><th>${k}</th><td>${esc(v || '')}</td></tr>`;
   return `<article class="hoja">
-  <header><h1>Consentimiento para el tratamiento de datos personales</h1><p>${esc(resp)}${A.cif ? ' · CIF ' + esc(A.cif) : ''}</p></header>
+  ${A.logo ? `<img class="hoja-logo" src="${esc(A.logo)}" alt="">` : ''}<header><h1>Consentimiento para el tratamiento de datos personales</h1><p>${esc(resp)}${A.cif ? ' · CIF ' + esc(A.cif) : ''}</p></header>
   <h2>Datos del cliente</h2>
   <table>${fila('Nombre y apellidos', c.nombre)}${c.numero_documento ? fila(c.tipo_documento || 'Documento', c.numero_documento) : fila('Documento de identidad', '')}${fila('Nacionalidad', nombrePais(c.nacionalidad))}${fila('Fecha de nacimiento', c.fecha_nacimiento ? fechaLargaD(c.fecha_nacimiento + 'T12:00') : '')}${fila('Teléfono', verTel(c.telefono, c.pais_telefono))}${fila('Correo electrónico', c.email)}${fila('Dirección', c.direccion)}</table>
   <h2>Información básica sobre protección de datos</h2>
@@ -1759,13 +1780,14 @@ async function abrirCliente(id) {
     ${id && nombreRepetido(c) ? `<div class="box warnb">Hay otro cliente con el mismo nombre. Comprueba la fecha de nacimiento o el teléfono para no confundirlos.</div>` : ''}
     ${id && pendienteAlta(c) && esRecepcion() ? `<div class="box warnb"><b>Pendiente de alta.</b> Lo apuntó ${esc((S.trabajadores.find(t => S.vinculadosUsuarios && S.vinculadosUsuarios[c.creado_por] === t.id) || {}).nombre || 'un trabajador')}. Revisa sus datos con el cliente y dalo de alta, o únelo con su ficha si ya existía.
       <div class="actions" style="margin-top:8px"><button class="primary" onclick="darDeAlta('${id}')">Dar de alta</button><button class="ghost" onclick="unirCliente('${id}')">Ya existe: unir</button></div></div>` : ''}
-    ${id && !esRecepcion() ? `<div class="box ${pendienteAlta(c) ? 'warnb' : 'info'}">${pendienteAlta(c) ? 'Pendiente de alta: recepción completará sus datos cuando venga. Mientras tanto puedes corregirlos.' : 'Dado de alta en el centro. Para cambiar sus datos, habla con recepción.'}</div>` : ''}
+    ${id && !esRecepcion() ? `<div class="box ${pendienteAlta(c) ? 'warnb' : 'info'}">${pendienteAlta(c) ? 'Pendiente de alta: recepción completará sus datos cuando venga. Mientras tanto puedes corregirlos.' : `Dado de alta en el centro. Para cambiar sus datos personales, habla con recepción.${c.consentimiento_salud ? ' Las anotaciones y las zonas de molestias sí puedes actualizarlas tú.' : ''}`}</div>` : ''}
     ${formCliente(c)}
     <div class="err" id="c-err"></div>
-    <div class="actions"><button class="ghost" onclick="closeSheet()">Cerrar</button>${puedeEditar ? `<button class="primary" onclick="guardarCliente(${id ? `'${id}'` : 'null'})">Guardar</button>` : ''}</div>
+    <div class="actions"><button class="ghost" onclick="closeSheet()">Cerrar</button>${puedeEditar ? `<button class="primary" onclick="guardarCliente(${id ? `'${id}'` : 'null'})">Guardar</button>` : id && c.consentimiento_salud ? `<button class="primary" onclick="guardarAnotaciones('${id}')">Guardar anotaciones</button>` : ''}</div>
     ${id ? `<div class="actions" style="margin-top:8px"><button class="ghost" onclick="closeSheet();abrirFormulario(null,{cliente_id:'${id}'})">Nueva cita para este cliente</button></div>
-    <div class="sect">Historial</div><div class="list">${citas.map(x => `<button class="row" onclick="verCitaAviso('${x.id}')"><span class="main"><b>${esc(nombreCita(x))}</b><small>${new Date(x.inicio).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: '2-digit' })} ${hhmm(new Date(x.inicio))} · ${esc(trab(x.trabajador_id).nombre)}</small></span><span class="end ${x.estado === 'no vino' ? 'bad' : x.estado === 'cancelada' ? 'warn' : x.estado === 'realizada' ? 'ok' : ''}">${ESTADOS[x.estado]}</span></button>`).join('') || '<p class="row muted">Sin citas todavía.</p>'}</div>` : ''}`);
+    <div class="sect">Historial</div><div class="list">${citas.map(x => `<button class="row" onclick="verCitaAviso('${x.id}')"><span class="main"><b>${esc(nombreCita(x))}</b><small>${new Date(x.inicio).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: '2-digit' })} ${hhmm(new Date(x.inicio))} · ${esc(trab(x.trabajador_id).nombre)}</small></span><span class="end ${x.estado === 'no vino' ? 'bad' : x.estado === 'cancelada' ? 'warn' : x.estado === 'realizada' ? 'ok' : ''}">${ESTADOS[x.estado]}</span></button>`).join('') || '<p class="row muted">Sin citas todavía.</p>'}</div><div id="c-cambios"></div>` : ''}`);
   if ($('#mc-ficha')) activarMapa('mc-ficha', c.zonas_dolor || []);
+  if (id) pintarCambiosCliente(id);
 }
 function formCliente(c) {
   const ficha = hayFicha();
@@ -1789,7 +1811,8 @@ function formCliente(c) {
       : `<label class="chk"><input type="checkbox" id="c-cons" ${c.consentimiento_salud ? 'checked' : ''} onchange="$('#c-salud').disabled=!this.checked"> <span><b>El cliente da su consentimiento</b> para guardar anotaciones sobre su salud o molestias</span></label>`}
       ${hayMapa() ? `<div class="field"><span class="flabel">Zonas con molestias</span>${c.consentimiento_salud ? mapaCuerpo(c.zonas_dolor || [], true, 'mc-ficha') : `<div class="mapa-bloq">${mapaCuerpo(c.zonas_dolor || [], false, 'mc-bloq')}<p>Disponible cuando el cliente firme el consentimiento</p></div>`}</div>` : ''}
       <div class="field"><label for="c-salud">Anotaciones del cliente</label><textarea id="c-salud" rows="3" ${c.consentimiento_salud ? '' : 'disabled'} placeholder="Ej.: tiene problemas de espalda · deportista, juega al tenis y se queja del brazo">${esc(c.salud || '')}</textarea>
-      <small class="muted">Solo lo ven recepción y quien atiende a este cliente.</small></div></div>` : ''}
+      <small class="muted">Solo lo ven recepción y quien atiende a este cliente.</small>
+      ${c.id ? '<small class="muted" id="c-anot-meta" style="display:block;margin-top:4px"></small><div id="c-versiones" class="versiones" hidden></div>' : ''}</div></div>` : ''}
     <div class="field"><label for="c-notas">Notas y preferencias</label><textarea id="c-notas" rows="2" placeholder="Prefiere tardes, presión suave…">${esc(c.notas || '')}</textarea></div>`;
 }
 function datosFormCliente(orig = {}) {
@@ -1859,6 +1882,442 @@ async function guardarCliente(id, siguiente) {
   closeSheet(); toast('Cliente guardado');
 }
 
+/* ================= historial de cambios ================= */
+const CAMPOS_TXT = {
+  inicio: 'hora', fin: 'hora de fin', trabajador_id: 'profesional', cabina_id: 'cabina', servicio_id: 'servicio', estado: 'estado', precio: 'precio',
+  concepto: 'qué se hace', notas: 'notas', llego_tarde: 'llegó tarde', cliente_id: 'cliente',
+  salud: 'anotaciones', zonas_dolor: 'zonas de molestias', nombre: 'nombre', nombre_pila: 'nombre', apellidos: 'apellidos', telefono: 'teléfono',
+  pais_telefono: 'prefijo', email: 'email', idioma: 'idioma', direccion: 'dirección', fecha_nacimiento: 'fecha de nacimiento', sexo: 'sexo',
+  tipo_documento: 'documento', numero_documento: 'número de documento', nacionalidad: 'nacionalidad', validado: 'alta en el centro',
+  consentimiento_salud: 'consentimiento', consentimiento_salud_en: null, consentimiento_comunicaciones: 'recordatorios', consentimiento_rechazado_en: null
+};
+function valorCambio(k, v) {
+  if (v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length)) return '—';
+  if (k === 'inicio' || k === 'fin') { const d = new Date(v); return `${d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} ${hhmm(d)}`; }
+  if (k === 'trabajador_id') return trab(v).nombre || '—';
+  if (k === 'cabina_id') return cab(v).nombre || '—';
+  if (k === 'servicio_id') return srv(v).nombre || '—';
+  if (k === 'cliente_id') return cli(v).nombre || '—';
+  if (k === 'estado') return ESTADOS[v] || v;
+  if (k === 'precio') return eur(v);
+  if (k === 'zonas_dolor') return v.map(z => ZONAS[z] || z).join(', ');
+  if (typeof v === 'boolean') return v ? 'sí' : 'no';
+  return String(v).length > 60 ? String(v).slice(0, 57) + '…' : String(v);
+}
+function textoCambio(x) {
+  const que = x.tabla === 'citas' ? 'la cita' : 'la ficha';
+  if (x.accion === 'crear') return `Creó ${que}`;
+  if (x.accion === 'borrar') return `Borró ${que}`;
+  const partes = Object.entries(x.campos || {}).filter(([k]) => CAMPOS_TXT[k] !== null && !(k === 'fin' && x.campos.inicio)).map(([k, [a, b]]) => {
+    const n = CAMPOS_TXT[k] || k;
+    if (k === 'salud' || k === 'notas') return `cambió ${n}`;
+    return `${n}: ${valorCambio(k, a)} → ${valorCambio(k, b)}`;
+  });
+  return partes.length ? partes.join(' · ') : 'Actualizó ' + que;
+}
+const cuandoCambio = en => { const d = new Date(en); return `${d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: d.getFullYear() !== new Date().getFullYear() ? '2-digit' : undefined })} ${hhmm(d)}`; };
+async function cargarCambios(filtro, valor, limite = 40) {
+  try {
+    const r = await sb.from('cambios').select('*').eq(filtro, valor).order('en', { ascending: false }).limit(limite);
+    return r.error ? null : r.data;
+  } catch (e) { return null; }
+}
+function listaCambios(l) {
+  return `<div class="list cambios">${l.map(x => `<div class="row"><span class="main"><b style="font-weight:500">${esc(textoCambio(x))}</b><small>${esc(x.quien || '—')} · ${cuandoCambio(x.en)}</small></span></div>`).join('')}</div>`;
+}
+// Cita: quién la creó y quién la cambió
+async function pintarCambiosCita(id) {
+  const l = await cargarCambios('registro_id', id, 20), box = $('#cita-cambios');
+  if (!box || !l || !l.length) return;
+  box.innerHTML = `<details class="historial"><summary>Historial de la cita · ${esc(l[l.length - 1].quien || '')} la creó${l.length > 1 ? `, último cambio de ${esc(l[0].quien || '')}` : ''}</summary>${listaCambios(l)}</details>`;
+}
+// Ficha del cliente: versiones de las anotaciones y todos los cambios
+async function pintarCambiosCliente(id) {
+  const l = await cargarCambios('cliente_id', id, 60);
+  if (!l) return;
+  const anot = l.filter(x => x.campos && (x.campos.salud || x.campos.zonas_dolor));
+  const meta = $('#c-anot-meta');
+  if (meta && anot.length) {
+    const u = anot[0];
+    meta.innerHTML = `Última modificación: <b>${esc(u.quien || '—')}</b>, ${cuandoCambio(u.en)}.${anot.some(x => x.campos.salud) ? ' <button type="button" class="linkbtn" onclick="verVersionesAnotaciones()">Ver versiones anteriores</button>' : ''}`;
+    window._versiones = anot.filter(x => x.campos.salud);
+  }
+  const box = $('#c-cambios');
+  if (box && l.length) box.innerHTML = `<details class="historial"><summary>Historial de cambios (${l.length}${l.length === 60 ? '+' : ''})</summary>${listaCambios(l)}</details>`;
+}
+function verVersionesAnotaciones() {
+  const v = window._versiones || [], box = $('#c-versiones');
+  if (!box) return;
+  box.innerHTML = v.map(x => `<div class="version"><small><b>${esc(x.quien || '—')}</b> · ${cuandoCambio(x.en)}</small><p>${esc(x.campos.salud[1] || '(vacío)')}</p>${x.campos.salud[0] ? `<small class="muted">Antes: ${esc(x.campos.salud[0])}</small>` : ''}</div>`).join('');
+  box.hidden = !box.hidden;
+}
+// El profesional que atiende al cliente actualiza las anotaciones (aunque la ficha la gestione recepción)
+async function guardarAnotaciones(id) {
+  const salud = $('#c-salud') ? $('#c-salud').value : '';
+  const zonas = window._zonas ? [...window._zonas] : (cli(id).zonas_dolor || []);
+  const r = await sb.rpc('guardar_anotaciones', { p_cliente: id, p_salud: salud, p_zonas: zonas });
+  if (r.error) { $('#c-err').textContent = /function|guardar_anotaciones/i.test(r.error.message) ? 'Falta la actualización 11 en la base de datos.' : r.error.message; return; }
+  await cargarClientes(); toast('Anotaciones guardadas'); abrirCliente(id);
+}
+
+/* ================= logo del centro ================= */
+function elegirLogo(input) {
+  const f = input.files && input.files[0]; if (!f) return;
+  const img = new Image(), url = URL.createObjectURL(f);
+  img.onload = () => {
+    const lado = 192, k = Math.min(1, lado / Math.max(img.width, img.height));
+    const cv = document.createElement('canvas'); cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
+    cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+    const d = cv.toDataURL('image/png');
+    $('#a-logo').value = d; $('#a-logo-ver').innerHTML = `<img src="${d}" alt="Logo">`; URL.revokeObjectURL(url);
+  };
+  img.onerror = () => toast('No se pudo leer esa imagen');
+  img.src = url;
+}
+
+/* ================= importar clientes ================= */
+const CAMPOS_IMPORT = [
+  ['', '— No importar —'], ['nombre', 'Nombre (o nombre completo)'], ['apellidos', 'Apellidos'], ['telefono', 'Teléfono'], ['email', 'Email'],
+  ['fecha_nacimiento', 'Fecha de nacimiento'], ['numero_documento', 'DNI / NIE / Pasaporte'], ['direccion', 'Dirección'], ['notas', 'Notas'],
+  ['idioma', 'Idioma'], ['sexo', 'Sexo'], ['nacionalidad', 'Nacionalidad']
+];
+function adivinarCampo(h) {
+  const t = normNombre(h || '');
+  const reglas = [['apellidos', /apellido/], ['nombre', /^(nombre|nombre y apellidos|nombre completo|cliente|paciente|name|full name)$/], ['nombre', /nombre/],
+    ['telefono', /tel|movil|celular|phone|whatsapp/], ['email', /mail|correo/], ['fecha_nacimiento', /nacim|cumple|birth|f\. ?nac/],
+    ['numero_documento', /dni|nie|nif|pasaporte|documento|passport/], ['direccion', /direcc|domicilio|calle|address/], ['notas', /nota|observ|comentario/],
+    ['idioma', /idioma|lengua|language/], ['sexo', /sexo|genero|gender/], ['nacionalidad', /nacionalidad|pais|country/]];
+  const r = reglas.find(([, re]) => re.test(t));
+  return r ? r[0] : '';
+}
+function leerCSV(txt) {
+  const sep = [';', '\t', ','].map(s => [s, (txt.split('\n')[0].match(new RegExp(s === '\t' ? '\t' : '\\' + s, 'g')) || []).length]).sort((a, b) => b[1] - a[1])[0][0];
+  const filas = []; let fila = [], campo = '', comillas = false;
+  for (let i = 0; i < txt.length; i++) {
+    const ch = txt[i];
+    if (comillas) { if (ch === '"' && txt[i + 1] === '"') { campo += '"'; i++; } else if (ch === '"') comillas = false; else campo += ch; }
+    else if (ch === '"') comillas = true;
+    else if (ch === sep) { fila.push(campo); campo = ''; }
+    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && txt[i + 1] === '\n') i++; fila.push(campo); filas.push(fila); fila = []; campo = ''; }
+    else campo += ch;
+  }
+  if (campo || fila.length) { fila.push(campo); filas.push(fila); }
+  return filas.filter(f => f.some(c => String(c).trim()));
+}
+async function cargarLibreriaExcel() {
+  if (window.XLSX) return;
+  await new Promise((ok, mal) => { const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; s.onload = ok; s.onerror = mal; document.head.appendChild(s); });
+}
+function abrirImportar() {
+  sheet(`<h3>Importar clientes</h3>
+    <p class="muted" style="margin:0">Sube la lista de clientes que exportes de tu programa actual: Excel (.xlsx) o CSV. La primera fila debe tener los títulos de las columnas (Nombre, Teléfono, Email…).</p>
+    <div class="field"><label for="imp-f">Archivo</label><input id="imp-f" type="file" accept=".xlsx,.xls,.csv,.txt,text/csv"></div>
+    <div id="imp-res"></div>
+    <div class="err" id="imp-err"></div>
+    <div class="actions"><button class="ghost" onclick="closeSheet()">Cerrar</button></div>`);
+  $('#imp-f').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    $('#imp-err').textContent = ''; $('#imp-res').innerHTML = '<div class="spinner"></div>';
+    try {
+      let filas;
+      if (/\.xlsx?$/i.test(f.name)) {
+        await cargarLibreriaExcel();
+        const wb = XLSX.read(await f.arrayBuffer(), { type: 'array', cellDates: true });
+        filas = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: '' });
+        filas = filas.map(r => r.map(c => c instanceof Date ? dkey(new Date(c.getTime() + 12 * 3600e3)) : String(c))).filter(r => r.some(c => c.trim()));
+      } else {
+        const buf = await f.arrayBuffer();
+        let txt = new TextDecoder('utf-8').decode(buf);
+        if (txt.includes('�')) txt = new TextDecoder('windows-1252').decode(buf);
+        filas = leerCSV(txt.replace(/^﻿/, ''));
+      }
+      if (filas.length < 2) throw new Error('El archivo no tiene clientes (hace falta una fila de títulos y al menos un cliente).');
+      window._imp = { cab: filas[0], filas: filas.slice(1) };
+      pintarImportar();
+    } catch (err) { $('#imp-res').innerHTML = ''; $('#imp-err').textContent = err.message || 'No se pudo leer el archivo.'; }
+  };
+}
+function pintarImportar() {
+  const { cab, filas } = window._imp;
+  const map = window._imp.map = window._imp.map || cab.map(adivinarCampo);
+  $('#imp-res').innerHTML = `<p><b>${filas.length}</b> ${filas.length === 1 ? 'cliente encontrado' : 'clientes encontrados'}. Comprueba qué es cada columna:</p>
+    <div class="tablewrap"><table class="imp"><thead><tr>${cab.map((h, i) => `<th><small class="muted">${esc(h || 'Columna ' + (i + 1))}</small><br><select data-i="${i}">${CAMPOS_IMPORT.map(([k, v]) => `<option value="${k}" ${map[i] === k ? 'selected' : ''}>${v}</option>`).join('')}</select></th>`).join('')}</tr></thead>
+    <tbody>${filas.slice(0, 5).map(r => `<tr>${cab.map((_, i) => `<td>${esc(r[i] || '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+    ${filas.length > 5 ? `<p class="note" style="margin-top:4px">… y ${filas.length - 5} más.</p>` : ''}
+    <p class="note">Se saltan los clientes que ya existen (mismo teléfono, documento o nombre) y las filas sin nombre. Entran ya dados de alta en el centro.</p>
+    <div class="actions"><button class="primary" id="imp-go">Importar clientes</button></div>`;
+  $('#imp-res').querySelectorAll('select').forEach(s => s.onchange = () => { map[+s.dataset.i] = s.value; });
+  $('#imp-go').onclick = importarClientes;
+}
+function fechaImport(v) {
+  v = String(v || '').trim(); if (!v) return null;
+  let m = v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/); if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  m = v.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})$/);
+  if (m) { let y = +m[3]; if (y < 100) y += y > new Date().getFullYear() % 100 ? 1900 : 2000; return `${y}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`; }
+  if (/^\d{5}$/.test(v)) return dkey(new Date(Date.UTC(1899, 11, 30) + +v * 864e5 + 12 * 3600e3)); // número de fecha de Excel
+  return null;
+}
+async function importarClientes() {
+  const { cab, filas, map } = window._imp, btn = $('#imp-go');
+  if (!map.includes('nombre')) { $('#imp-err').textContent = 'Indica qué columna es el nombre.'; return; }
+  const ficha = hayFicha(), doc = hayDoc();
+  const telNorm = t => String(t || '').replace(/\D/g, '').replace(/^00/, '').replace(/^34(?=\d{9}$)/, '');
+  const yaTel = new Set(S.clientes.map(c => telNorm(c.telefono)).filter(Boolean));
+  const yaDoc = new Set(S.clientes.map(c => (c.numero_documento || '').toUpperCase()).filter(Boolean));
+  const yaNom = new Set(S.clientes.map(c => normNombre(c.nombre)));
+  const nuevos = []; let saltados = 0;
+  for (const r of filas) {
+    const v = k => { const i = map.indexOf(k); return i < 0 ? '' : String(r[i] ?? '').trim(); };
+    let pila = capitalizar(v('nombre')), apell = capitalizar(v('apellidos'));
+    if (!apell && pila.includes(',')) { const [ap, ...no] = pila.split(','); pila = capitalizar(no.join(' ').trim()); apell = capitalizar(ap.trim()); }
+    if (!pila) { saltados++; continue; }
+    if (!apell && !map.includes('apellidos')) {
+      if (pila.includes(',')) { const [ap, ...no] = pila.split(','); pila = capitalizar(no.join(' ').trim()); apell = capitalizar(ap.trim()); }   // «López García, Juan»
+      else if (pila.includes(' ')) { const p = pila.split(' '); pila = p[0]; apell = p.slice(1).join(' '); }
+    }
+    if (!pila) { saltados++; continue; }
+    const nombre = (pila + ' ' + apell).trim();
+    let tel = v('telefono').replace(/[^\d+]/g, ''), pais = 'ES';
+    if (tel) { if (/^(\+|00)/.test(tel)) { const pt = partirTel(tel.replace(/^00/, '+')); pais = pt.pais; tel = '+' + tel.replace(/^\+|^00/, ''); } else if (/^\d{9}$/.test(tel)) tel = '+34' + tel; }
+    const ndoc = v('numero_documento').toUpperCase().replace(/[\s.-]/g, '');
+    if ((tel && yaTel.has(telNorm(tel))) || (ndoc && yaDoc.has(ndoc)) || yaNom.has(normNombre(nombre))) { saltados++; continue; }
+    yaNom.add(normNombre(nombre)); if (tel) yaTel.add(telNorm(tel)); if (ndoc) yaDoc.add(ndoc);
+    const idi = normNombre(v('idioma')).slice(0, 2), sx = normNombre(v('sexo'));
+    const d = { nombre, telefono: tel || null, email: v('email') || null, notas: v('notas') || null, idioma: LANGS[idi] ? idi : ({ in: 'en', al: 'de', fr: 'fr', no: 'no' }[idi] || 'es'), validado: true };
+    if (ficha) Object.assign(d, { nombre_pila: pila, apellidos: apell || null, pais_telefono: pais, fecha_nacimiento: fechaImport(v('fecha_nacimiento')), direccion: v('direccion') || null,
+      sexo: /^(m|mujer|f|femenino)/.test(sx) ? 'mujer' : /^(h|hombre|v|varon|masculino)/.test(sx) ? 'hombre' : null });
+    if (doc && ndoc) Object.assign(d, { numero_documento: ndoc, tipo_documento: /^[XYZ]\d{7}[A-Z]$/.test(ndoc) ? 'NIE' : /^\d{8}[A-Z]$/.test(ndoc) ? 'DNI' : 'Pasaporte' });
+    if (doc && v('nacionalidad')) { const n = normNombre(v('nacionalidad')); const p = PAISES.find(x => x[0].toLowerCase() === n || normNombre(x[1]) === n); if (p) d.nacionalidad = p[0]; }
+    nuevos.push(d);
+  }
+  if (!nuevos.length) { $('#imp-err').textContent = `No hay clientes nuevos que importar (${saltados} ya existían o no tenían nombre).`; return; }
+  btn.disabled = true;
+  let hechos = 0;
+  for (let i = 0; i < nuevos.length; i += 200) {
+    btn.textContent = `Importando… ${hechos} de ${nuevos.length}`;
+    const r = await sb.from('clientes').insert(nuevos.slice(i, i + 200));
+    if (r.error) { $('#imp-err').textContent = `Se pararon en ${hechos}: ${r.error.message}`; btn.disabled = false; btn.textContent = 'Reintentar'; await cargarClientes(); return; }
+    hechos += Math.min(200, nuevos.length - i);
+  }
+  await cargarClientes(); closeSheet(); renderVista();
+  toast(`${hechos} clientes importados${saltados ? ` · ${saltados} saltados` : ''}`);
+}
+
+/* ================= estadísticas (dirección) ================= */
+const EPER = { mes: 'Mes', trimestre: 'Trimestre', anio: 'Año', todo: 'Todos los años' };
+const MESES_C = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+const DIAS_L = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+const DIAS_PL = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábados', 'domingos'];
+const SERIES = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)', 'var(--s6)', 'var(--s7)', 'var(--s8)'];
+const eur0 = n => Math.round(+n || 0).toLocaleString('es-ES') + ' €';
+const pct = (a, b) => b ? Math.round(a / b * 100) : 0;
+function rangoEst(ref = S.eRef, per = S.eP) {
+  const d = new Date(ref + 'T12:00'); let a, b, label;
+  if (per === 'mes') { a = new Date(d.getFullYear(), d.getMonth(), 1); b = new Date(d.getFullYear(), d.getMonth() + 1, 0); label = a.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' }); }
+  else if (per === 'trimestre') { const q = Math.floor(d.getMonth() / 3); a = new Date(d.getFullYear(), q * 3, 1); b = new Date(d.getFullYear(), q * 3 + 3, 0); label = `${q + 1}.º trimestre ${d.getFullYear()}`; }
+  else if (per === 'anio') { a = new Date(d.getFullYear(), 0, 1); b = new Date(d.getFullYear(), 11, 31); label = String(d.getFullYear()); }
+  else { a = null; b = new Date(); label = 'Todos los años'; }
+  return { a: a && dkey(a), b: dkey(b), label };
+}
+function moverEst(n) {
+  const d = new Date(S.eRef + 'T12:00');
+  if (S.eP === 'mes') d.setMonth(d.getMonth() + n, 1);
+  else if (S.eP === 'trimestre') d.setMonth(d.getMonth() + 3 * n, 1);
+  else d.setFullYear(d.getFullYear() + n);
+  S.eRef = dkey(d); renderVista();
+}
+function vistaEstadisticas() {
+  if (!S.propietario) return '<div class="list"><p class="row muted">Las estadísticas solo las ve dirección.</p></div>';
+  S.eP = S.eP || 'anio'; S.eRef = S.eRef || dkey(new Date());
+  const { label } = rangoEst();
+  return `<div class="chips noprint" style="padding-top:8px">${Object.entries(EPER).map(([k, v]) => `<button aria-pressed="${S.eP === k}" onclick="S.eP='${k}';renderVista()">${v}</button>`).join('')}</div>
+  <div class="daybar noprint">${S.eP === 'todo' ? '<span></span>' : '<button class="iconbtn" aria-label="Anterior" onclick="moverEst(-1)">‹</button>'}<div class="date">${esc(label)}</div>${S.eP === 'todo' ? '<span></span>' : '<button class="iconbtn" aria-label="Siguiente" onclick="moverEst(1)">›</button>'}</div>
+  <div class="toolbar noprint"><button class="pill" onclick="S.eRef=dkey(new Date());renderVista()">Hoy</button><span class="grow"></span><button class="pill" onclick="descargarEstadisticas()">Descargar Excel</button><button class="pill" onclick="imprimirInforme()">Imprimir informe</button></div>
+  <div id="est"><div class="spinner"></div></div>`;
+}
+async function cargarEstadisticas() {
+  const box = () => $('#est');
+  const { a, b, label } = rangoEst();
+  const pedir = (x, y) => sb.rpc('estadisticas', { p_desde: x, p_hasta: y });
+  if (!S.estTodo || Date.now() - S.estTodo.t > 5 * 60000) {
+    const r = await pedir(null, dkey(new Date(new Date().getFullYear(), 11, 31)));
+    if (r.error) { if (box()) box().innerHTML = `<div class="box warnb">${/estadisticas|function/i.test(r.error.message) ? 'Falta la actualización 11 en la base de datos.' : esc(r.error.message)}</div>`; return; }
+    S.estTodo = { t: Date.now(), d: r.data };
+  }
+  const r = S.eP === 'todo' ? { data: S.estTodo.d } : await pedir(a, b);
+  if (!box()) return;
+  if (r.error) { box().innerHTML = `<p class="err">${esc(r.error.message)}</p>`; return; }
+  S.estActual = { datos: r.data, label };
+  box().innerHTML = pintarEstadisticas(r.data, S.estTodo.d);
+}
+// Suma los días de un rango [a, b] (claves AAAA-MM-DD) del paquete completo
+function sumaDias(todo, a, b, t) {
+  const o = { imp: 0, n: 0, nv: 0, ca: 0, pe: 0, mo: 0 };
+  for (const x of todo.dias) if ((!a || x.d >= a) && x.d <= b && (!t || x.t === t)) for (const k in o) o[k] += +x[k] || 0;
+  return o;
+}
+function delta(act, ant) {
+  if (!ant) return '';
+  const v = Math.round((act - ant) / ant * 100);
+  return `<em class="${v >= 0 ? 'ok' : 'bad'}">${v >= 0 ? '▲' : '▼'} ${Math.abs(v)} % vs año anterior</em>`;
+}
+function grupoDe(dk, modo) {
+  const d = new Date(dk + 'T12:00');
+  if (modo === 'dia') return dk;
+  if (modo === 'semana') return lunesDe(dk);
+  if (modo === 'mes') return dk.slice(0, 7);
+  if (modo === 'trimestre') return d.getFullYear() + '-T' + (Math.floor(d.getMonth() / 3) + 1);
+  return String(d.getFullYear());
+}
+function etiquetaGrupo(g, modo) {
+  if (modo === 'dia') return String(+g.slice(8));
+  if (modo === 'semana') return fechaCorta(g + 'T12:00');
+  if (modo === 'mes') return MESES_C[+g.slice(5, 7) - 1] + (S.eP === 'todo' ? ' ' + g.slice(2, 4) : '');
+  if (modo === 'trimestre') return g.slice(5) + ' ' + g.slice(2, 4);
+  return g;
+}
+// Barras verticales en HTML (se leen bien en el móvil y en papel)
+function barras(items, { alto = 170, fmt = eur0, cada = 1 } = {}) {
+  const max = Math.max(1, ...items.map(x => x.v));
+  const paso = Math.pow(10, Math.floor(Math.log10(max))), tope = Math.ceil(max / paso) * paso;
+  return `<div class="chart barras-g"><div class="ejes" style="height:${alto}px"><span>${fmt(tope)}</span><span>${fmt(tope / 2)}</span><span>0</span></div>
+    <div class="cols" style="height:${alto}px">${items.map(x => `<div class="col" data-tip="${esc(x.tip || (x.l + ': ' + fmt(x.v)))}"><i style="height:${x.v / tope * 100}%"${x.c ? ` class="${x.c}"` : ''}></i></div>`).join('')}</div>
+    <span></span><div class="etiq">${items.map((x, i) => `<span>${i % cada === 0 ? esc(x.l) : ''}</span>`).join('')}</div></div>`;
+}
+function lineasAnios(todo) {
+  const porAnio = {};
+  todo.dias.forEach(x => { const y = x.d.slice(0, 4), m = +x.d.slice(5, 7) - 1; (porAnio[y] = porAnio[y] || Array(12).fill(0))[m] += +x.imp || 0; });
+  const anios = Object.keys(porAnio).sort().slice(-4);
+  if (anios.length < 2) return '';
+  const hoy = new Date(), max = Math.max(1, ...anios.flatMap(y => porAnio[y]));
+  const paso = Math.pow(10, Math.floor(Math.log10(max))), tope = Math.ceil(max / paso) * paso;
+  const W = 600, H = 200, x = m => (m + .5) * W / 12, y = v => H - 8 - v / tope * (H - 20);
+  const linea = (yr, i) => {
+    const ini = todo.primer_dia || '0000', pts = porAnio[yr].map((v, m) => ((+yr === hoy.getFullYear() && m >= hoy.getMonth()) || `${yr}-${String(m + 1).padStart(2, '0')}` < ini.slice(0, 7)) ? null : [x(m), y(v)]).filter(Boolean);
+    return `<polyline points="${pts.map(p => p.join(',')).join(' ')}" fill="none" stroke="${SERIES[i]}" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/>`;
+  };
+  return `<div class="sect">Comparativa entre años</div>
+  <div class="chart"><div class="leyenda">${anios.map((yr, i) => `<span><i style="background:${SERIES[i]}"></i>${yr}</span>`).join('')}</div>
+    <div class="lineas"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="Facturación mensual por año">
+      ${[0, .5, 1].map(f => `<line x1="0" x2="${W}" y1="${y(tope * f)}" y2="${y(tope * f)}" class="rejilla" vector-effect="non-scaling-stroke"/>`).join('')}
+      ${anios.map(linea).join('')}</svg>
+      <div class="zonas">${MESES_C.map((mm, m) => `<div data-tip="${esc(mm + ': ' + anios.map(yr => yr + ' ' + eur0(porAnio[yr][m])).join(' · '))}"></div>`).join('')}</div></div>
+    <div class="etiq">${MESES_C.map(mm => `<span>${mm}</span>`).join('')}</div>
+    <p class="note" style="margin:6px 0 0">Eje: 0 – ${eur0(tope)} al mes. El mes en curso no se dibuja hasta que termina.</p></div>`;
+}
+function pintarEstadisticas(E, todo) {
+  const { a, b } = rangoEst();
+  const tot = sumaDias(E, null, '9999');
+  const hoyK = dkey(new Date());
+  // Mismo periodo del año anterior (hasta la misma fecha si es el periodo en curso)
+  let ant = null;
+  if (S.eP !== 'todo') {
+    const menos = k => (+k.slice(0, 4) - 1) + k.slice(4);
+    const fin = b > hoyK ? hoyK : b;
+    ant = sumaDias(todo, menos(a), menos(fin));
+    const actHastaHoy = sumaDias(E, a, fin);
+    tot._cmp = actHastaHoy;
+  }
+  const cap = E.capacidad.reduce((s, x) => s + (+x.md || 0), 0), ocu = E.ocupado.reduce((s, x) => s + (+x.mo || 0), 0);
+  const reserv = tot.n + tot.nv + tot.ca;
+  // Facturación a lo largo del periodo
+  const modo = { mes: 'dia', trimestre: 'semana', anio: 'mes', todo: 'mes' }[S.eP];
+  const grupos = {};
+  if (S.eP !== 'todo') { for (let d = new Date(a + 'T12:00'); dkey(d) <= b; d.setDate(d.getDate() + 1)) grupos[grupoDe(dkey(d), modo)] = 0; }
+  E.dias.forEach(x => { if (S.eP !== 'todo' && (x.d < a || x.d > b)) return; const g = grupoDe(x.d, modo); grupos[g] = (grupos[g] || 0) + (+x.imp || 0); });
+  const serie = Object.keys(grupos).sort().map(g => ({ l: etiquetaGrupo(g, modo), v: grupos[g], tip: `${modo === 'semana' ? 'Semana del ' : ''}${etiquetaGrupo(g, modo)}${modo === 'dia' ? ' ' + MESES_C[+a.slice(5, 7) - 1] : ''}: ${eur0(grupos[g])}` }));
+  // Por hora y por día de la semana
+  const porHora = {}, porDia = Array(7).fill(0);
+  E.horas.forEach(x => { porHora[x.h] = (porHora[x.h] || 0) + (+x.imp || 0); porDia[x.w - 1] += +x.imp || 0; });
+  const horasAb = [...new Set(E.capacidad.map(x => x.h))].sort((p, q) => p - q);
+  const capDia = {}; E.capacidad.forEach(x => capDia[x.w] = (capDia[x.w] || 0) + (+x.md || 0));
+  const maxDia = Math.max(1, ...Object.values(capDia));
+  const diasAb = Object.keys(capDia).map(Number).filter(w => capDia[w] >= maxDia * 0.2).sort();   // un día que solo abrió alguna vez no cuenta
+  // Ocupación por franja
+  const capK = {}, ocuK = {};
+  E.capacidad.forEach(x => capK[x.w + '-' + x.h] = +x.md);
+  E.ocupado.forEach(x => ocuK[x.w + '-' + x.h] = +x.mo);
+  const celdas = []; diasAb.forEach(w => horasAb.forEach(h => { const c = capK[w + '-' + h]; if (c) celdas.push({ w, h, p: Math.min(100, pct(ocuK[w + '-' + h] || 0, c)), libres: Math.max(0, c - (ocuK[w + '-' + h] || 0)) / 60 }); }));
+  const semanas = Math.max(1, (new Date((S.eP === 'todo' ? E.hasta : b) + 'T12:00') - new Date((S.eP === 'todo' ? E.desde : a) + 'T12:00')) / 6048e5);
+  const capMed = [...celdas].map(c => capK[c.w + '-' + c.h]).sort((p, q) => p - q)[Math.floor(celdas.length / 2)] || 0;
+  const habituales = celdas.filter(c => capK[c.w + '-' + c.h] >= capMed * 0.5);   // franjas que se abren casi siempre
+  const flojas = [...habituales].sort((p, q) => p.p - q.p).slice(0, 3), fuertes = [...habituales].sort((p, q) => q.p - p.p).slice(0, 3);
+  const horaTop = Object.entries(porHora).sort((p, q) => q[1] - p[1])[0];
+  const diaTop = porDia.indexOf(Math.max(...porDia));
+  const franja = c => `${DIAS_L[c.w - 1].toLowerCase()} de ${c.h} a ${c.h + 1} h`;
+  // Profesionales y servicios
+  const porT = {}; E.dias.forEach(x => { const p = porT[x.t] = porT[x.t] || { imp: 0, n: 0, nv: 0, ca: 0, mo: 0 }; for (const k in p) p[k] += +x[k] || 0; });
+  const maxT = Math.max(1, ...Object.values(porT).map(p => p.imp));
+  const serv = [...E.servicios].sort((p, q) => q.imp - p.imp).slice(0, 8), maxS = Math.max(1, ...serv.map(x => +x.imp));
+  const cmp = tot._cmp || tot;
+  return `<div class="stats">
+      <div class="stat"><small>Facturado</small><b>${eur0(tot.imp)}</b>${ant ? delta(cmp.imp, ant.imp) : `<em>desde ${fechaCorta(E.desde + 'T12:00')} ${E.desde.slice(0, 4)}</em>`}</div>
+      <div class="stat"><small>Citas realizadas</small><b>${tot.n.toLocaleString('es-ES')}</b>${ant ? delta(cmp.n, ant.n) : ''}</div>
+      <div class="stat"><small>Ticket medio</small><b>${eur(tot.n ? Math.round(tot.imp / tot.n * 100) / 100 : 0)}</b><em>por cita realizada</em></div>
+      <div class="stat"><small>Ocupación</small><b>${pct(ocu, cap)} %</b><em>${Math.round(Math.max(0, cap - ocu) / 60).toLocaleString('es-ES')} h libres en el periodo</em></div>
+      <div class="stat"><small>No vinieron</small><b class="${pct(tot.nv, reserv) >= 8 ? 'bad' : ''}">${pct(tot.nv, reserv)} %</b><em>${tot.nv} citas · ${tot.ca} canceladas</em></div>
+    </div>
+    <div class="claves">
+      ${horaTop ? `<p><b>Cuándo se factura más:</b> los ${DIAS_PL[diaTop]} y en la franja de ${horaTop[0]} a ${+horaTop[0] + 1} h.</p>` : ''}
+      ${fuertes.length ? `<p><b>Franjas más llenas:</b> ${fuertes.map(c => `${franja(c)} (${c.p} %)`).join(', ')}.</p>` : ''}
+      ${flojas.length ? `<p><b>Más horas libres:</b> ${flojas.map(c => `${franja(c)} (${c.p} % ocupado, ~${Math.round(c.libres / semanas * 10) / 10} h libres por semana)`).join(', ')}. Buen momento para promociones o bonos.</p>` : ''}
+    </div>
+    <div class="sect">Facturación ${S.eP === 'mes' ? 'por día' : S.eP === 'trimestre' ? 'por semana' : 'por mes'}</div>
+    ${barras(serie, { cada: serie.length > 16 ? Math.ceil(serie.length / 12) : 1 })}
+    ${S.eP === 'anio' || S.eP === 'todo' ? lineasAnios(todo) : ''}
+    <div class="dos-col">
+      <div><div class="sect">¿A qué hora se factura más?</div>
+      ${barras(horasAb.map(h => ({ l: h + 'h', v: porHora[h] || 0, tip: `De ${h} a ${h + 1} h: ${eur0(porHora[h] || 0)}`, c: horaTop && +horaTop[0] === h ? 'top' : '' })), { alto: 140, cada: horasAb.length > 8 ? 2 : 1 })}</div>
+      <div><div class="sect">Por día de la semana</div>
+      ${barras(diasAb.map(w => ({ l: DIAS_L[w - 1].slice(0, 3), v: porDia[w - 1], tip: `${DIAS_L[w - 1]}: ${eur0(porDia[w - 1])}`, c: w - 1 === diaTop ? 'top' : '' })), { alto: 140 })}</div>
+    </div>
+    <div class="sect">Ocupación: cuándo hay horas libres</div>
+    <div class="chart"><div class="mapa-calor" style="grid-template-columns:44px repeat(${horasAb.length},1fr)">
+      <span></span>${horasAb.map(h => `<span class="hh">${h}</span>`).join('')}
+      ${diasAb.map(w => `<span class="dd">${DIAS_L[w - 1].slice(0, 3)}</span>${horasAb.map(h => { const c = celdas.find(x => x.w === w && x.h === h); return c ? `<i data-tip="${esc(`${DIAS_L[w - 1]} de ${h} a ${h + 1} h: ${c.p} % ocupado · ~${Math.round(c.libres / semanas * 10) / 10} h libres por semana`)}" style="--p:${c.p}%"${c.p > 55 ? ' class="osc"' : ''}><small>${c.p}</small></i>` : '<i class="sin-horario" data-tip="Cerrado"></i>'; }).join('')}`).join('')}
+    </div>
+    <div class="escala"><span>Más libre</span><i></i><span>Más lleno</span></div></div>
+    <div class="sect">Por profesional</div>
+    <div class="tablewrap"><table><thead><tr><th>Profesional</th><th>Facturado</th><th></th><th>Citas</th><th>Ticket medio</th><th>No vino</th></tr></thead><tbody>
+      ${Object.entries(porT).sort((p, q) => q[1].imp - p[1].imp).map(([k, p]) => `<tr><td>${esc(trab(k).nombre || '—')}</td><td><b>${eur0(p.imp)}</b></td><td class="barra-celda"><i style="width:${p.imp / maxT * 100}%"></i></td><td>${p.n}</td><td>${eur(p.n ? Math.round(p.imp / p.n * 100) / 100 : 0)}</td><td>${pct(p.nv, p.n + p.nv + p.ca)} %</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Sin datos</td></tr>'}
+    </tbody></table></div>
+    <div class="sect">Servicios que más facturan</div>
+    <div class="bars">${serv.map(x => `<div class="bar"><span>${esc(srv(x.s).nombre || 'Otro')}</span><b class="num">${eur0(x.imp)} · ${x.n}</b><div class="track"><i style="width:${x.imp / maxS * 100}%"></i></div></div>`).join('') || '<p class="muted">Sin datos</p>'}</div>
+    <p class="note">Facturado = citas realizadas, con lo cobrado. Ocupación = tiempo reservado frente al horario de apertura de todo el equipo. Pasa el dedo o el ratón por las gráficas para ver cada valor.</p>`;
+}
+function imprimirInforme() {
+  const c = $('#est'); if (!c || !S.estActual) return;
+  const A = S.ajustes;
+  imprimirHoja(`<div class="informe">
+    <header>${A.logo ? `<img class="hoja-logo" src="${esc(A.logo)}" alt="">` : ''}<div><h1>Informe de actividad y facturación</h1>
+    <p>${esc(A.nombre_centro || '')} · ${esc(S.estActual.label)} · generado el ${new Date().toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })}</p></div></header>
+    ${c.innerHTML}</div>`);
+}
+function descargarEstadisticas() {
+  if (!S.estActual) return;
+  const E = S.estActual.datos, filas = [['Fecha', 'Profesional', 'Citas realizadas', 'Facturado', 'No vino', 'Canceladas', 'Pendientes', 'Minutos reservados']];
+  [...E.dias].sort((p, q) => p.d.localeCompare(q.d) || String(p.t).localeCompare(String(q.t))).forEach(x => filas.push([x.d, trab(x.t).nombre || '', x.n, String(x.imp).replace('.', ','), x.nv, x.ca, x.pe, x.mo]));
+  const csv = '﻿' + filas.map(f => f.map(v => /[;"\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v).join(';')).join('\r\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = `facturacion-${S.estActual.label.replace(/\W+/g, '-').toLowerCase()}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+// Globo con el valor al pasar por una barra o una celda
+(function () {
+  let tip;
+  const ver = (e, t) => {
+    if (!tip) { tip = document.createElement('div'); tip.className = 'globo'; document.body.appendChild(tip); }
+    tip.textContent = t; tip.hidden = false;
+    const x = Math.min(window.innerWidth - tip.offsetWidth - 8, Math.max(8, e.clientX - tip.offsetWidth / 2));
+    tip.style.left = x + 'px'; tip.style.top = Math.max(8, e.clientY - tip.offsetHeight - 14) + 'px';
+  };
+  const mover = e => { const el = e.target.closest && e.target.closest('[data-tip]'); if (el && el.closest('#est')) ver(e.touches ? e.touches[0] : e, el.dataset.tip); else if (tip) tip.hidden = true; };
+  document.addEventListener('mousemove', mover);
+  document.addEventListener('touchstart', mover, { passive: true });
+  document.addEventListener('scroll', () => { if (tip) tip.hidden = true; }, true);
+})();
+
 /* ================= facturación ================= */
 const PERIODOS = { dia: 'Día', semana: 'Semana', mes: 'Mes', trimestre: 'Trimestre', anio: 'Año' };
 function rangoPeriodo() {
@@ -1889,7 +2348,7 @@ function vistaFacturacion() {
 }
 async function cargarFacturacion() {
   const { a, b } = rangoPeriodo();
-  const r = await sb.from('citas').select('id,inicio,estado,trabajador_id,servicio_id' + (hayPrecioLibre() ? ',precio' : '') + ',cobros(importe,metodo)').gte('inicio', a.toISOString()).lt('inicio', b.toISOString());
+  const r = await todasLasFilas(() => sb.from('citas').select('id,inicio,estado,trabajador_id,servicio_id' + (hayPrecioLibre() ? ',precio' : '') + ',cobros(importe,metodo)').gte('inicio', a.toISOString()).lt('inicio', b.toISOString()).order('inicio').order('id'));
   const box = $('#fact'); if (!box) return;
   if (r.error) { box.innerHTML = `<p class="err">${esc(r.error.message)}</p>`; return; }
   const filas = r.data.map(c => { const cb = Array.isArray(c.cobros) ? c.cobros[0] : c.cobros; return { ...c, importe: cb ? +cb.importe : 0, precio: precioCita(c) }; });
@@ -1923,8 +2382,10 @@ async function cargarVinculados() {
 function vistaAjustes() {
   const A = S.ajustes;
   return `<div class="sect">Centro<button class="pill" onclick="editarCentro()">Editar</button></div>
-  <div class="list"><div class="row"><span class="main"><b>${esc(A.nombre_centro)}</b><small>${esc([A.telefono, A.direccion].filter(Boolean).join(' · ') || 'Sin teléfono ni dirección')}</small></span></div></div>
+  <div class="list"><div class="row">${A.logo ? `<span class="logo foto">${`<img src="${esc(A.logo)}" alt="">`}</span>` : ''}<span class="main"><b>${esc(A.nombre_centro)}</b><small>${esc([A.telefono, A.direccion].filter(Boolean).join(' · ') || 'Sin teléfono ni dirección')}</small></span></div></div>
   ${seccionHorario()}
+  <div class="sect">Clientes<button class="pill" onclick="abrirImportar()">Importar Excel o CSV</button></div>
+  <div class="list"><div class="row"><span class="main"><b>${S.clientes.length.toLocaleString('es-ES')} clientes</b><small>Para empezar rápido, sube la lista que exportes de tu programa actual. Se detectan las columnas y se saltan los repetidos.</small></span></div></div>
 
   <div class="sect">Equipo<button class="pill" onclick="editarTrabajador()">+ Trabajador</button></div>
   <div class="list">${S.trabajadores.map(t => `<button class="row" onclick="editarTrabajador('${t.id}')"><span class="avatar">${esc(iniciales(t.nombre))}</span><span class="main"><b>${esc(t.nombre)}${t.activo ? '' : ' <small class="muted">(de baja)</small>'}</b><small>${esc(t.email || 'Sin email: no podrá entrar en la app')}</small>
@@ -1948,7 +2409,7 @@ function vistaCuenta() {
   <div class="list"><div class="temas" role="group" aria-label="Apariencia">${TEMAS.map(([k, n, c]) => `<button type="button" class="tema" aria-pressed="${tm === k}" onclick="elegirTema('${k}')"><span class="muestra">${k === 'auto' ? `<i style="background:${c[0]}"></i><i style="background:${c[1]}"></i>` : `<i style="background:${c[0]}"></i><i style="background:${c[1]}"></i>`}</span>${n}</button>`).join('')}</div>
   <p class="note" style="margin:0 14px 12px">Automático cambia solo entre claro y oscuro según tu móvil u ordenador. La elección se guarda en este dispositivo.</p></div>
   <div class="sect">Este dispositivo</div>
-  <div class="list"><div class="row"><span class="main"><b>${esc(S.user.email)}</b><small>${esRecepcion() ? 'Recepción' : 'Trabajador · ' + esc(yo()?.nombre || '')}</small></span></div>
+  <div class="list"><div class="row"><span class="main"><b>${esc(S.user.email)}</b><small>${esRecepcion() ? (S.propietario ? 'Dirección (ve todo y las estadísticas)' : 'Recepción') : 'Trabajador · ' + esc(yo()?.nombre || '')}</small></span></div>
   <div class="row"><span class="main"><b>Avisos en este dispositivo</b><small>${permiso === 'granted' ? (S.pushActivo ? 'Activados: te llegarán aunque la app esté cerrada o el móvil bloqueado.' : 'Activados con la app abierta. Pulsa «Activar» para recibirlos también con la app cerrada.') : permiso === 'denied' ? 'Bloqueados en los ajustes del navegador o del móvil.' : esIOS() && !instalada() ? 'En iPhone, primero añade la app a la pantalla de inicio.' : 'Desactivados.'}</small></span>${permiso !== 'denied' && !S.pushActivo ? '<button class="pill" onclick="activarNotificaciones()">Activar</button>' : ''}</div>
   ${S.pushActivo ? '<div class="row"><span class="main"><b>Probar avisos</b><small>Te envía un aviso de prueba a ti.</small></span><span style="display:grid;gap:6px"><button class="pill" onclick="avisoPrueba(false)">Al móvil</button><button class="pill" onclick="avisoPrueba(true)">Móvil y correo</button></span></div>' : ''}
   <div class="row"><span class="main"><b>Probar sonido de alarma</b><small>El que suena cuando dos trabajadores coinciden en una cabina.</small></span><button class="pill" onclick="alarma()">Probar</button></div></div>
@@ -1959,6 +2420,9 @@ function editarCentro() {
   const A = S.ajustes;
   sheet(`<h3>Datos del centro</h3>
     <div class="field"><label for="a-nombre">Nombre del centro</label><input id="a-nombre" value="${esc(A.nombre_centro)}"></div>
+    ${'logo' in A ? `<div class="field"><span class="flabel">Logo</span><div class="logo-edit"><span id="a-logo-ver" class="logo-ver">${A.logo ? `<img src="${esc(A.logo)}" alt="Logo">` : '<small class="muted">Sin logo</small>'}</span>
+      <label class="pill">Elegir imagen<input type="file" accept="image/*" hidden onchange="elegirLogo(this)"></label>${A.logo ? `<button type="button" class="pill" onclick="$('#a-logo').value='';$('#a-logo-ver').innerHTML='<small class=muted>Sin logo</small>'">Quitar</button>` : ''}</div>
+      <input type="hidden" id="a-logo" value="${esc(A.logo || '')}"><small class="muted">Sale en la cabecera de la app, en las hojas de consentimiento y en los informes.</small></div>` : ''}
     <div class="two"><div class="field"><label for="a-tel">Teléfono</label><input id="a-tel" value="${esc(A.telefono || '')}"></div>
       <div class="field"><label for="a-dir">Dirección</label><input id="a-dir" value="${esc(A.direccion || '')}"></div></div>
     ${hayConsent() ? `<div class="two"><div class="field"><label for="a-razon">Razón social</label><input id="a-razon" value="${esc(A.razon_social || '')}" placeholder="Empresa S.L."></div>
@@ -1971,6 +2435,7 @@ function editarCentro() {
 }
 async function guardarCentro() {
   const d = { id: 1, nombre_centro: $('#a-nombre').value.trim() || 'Mi centro', telefono: $('#a-tel').value.trim() || null, direccion: $('#a-dir').value.trim() || null };
+  if ($('#a-logo')) d.logo = $('#a-logo').value || null;
   if ($('#a-cif')) Object.assign(d, { razon_social: $('#a-razon').value.trim() || null, cif: $('#a-cif').value.trim() || null, email_contacto: $('#a-email').value.trim() || null, poblacion: $('#a-pobl').value.trim() || null });
   const r = await sb.from('ajustes').upsert(d).select().single();
   if (r.error) { $('#a-err').textContent = r.error.message; return; }

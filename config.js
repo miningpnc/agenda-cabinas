@@ -20,6 +20,7 @@ window.APP_CONFIG = {
   demo: {
     activa: true,
     recepcion:  { email: 'miningpnc+recepcion@gmail.com', password: 'recepcion' },
-    trabajador: { email: 'miningpnc+maria@gmail.com',     password: 'trabajador', nombre: 'María' }
+    trabajador: { email: 'miningpnc+maria@gmail.com',     password: 'trabajador', nombre: 'María' },
+    propietario: { email: 'miningpnc+propietario@gmail.com', password: 'propietario' }
   }
 };
