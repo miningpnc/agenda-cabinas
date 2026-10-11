@@ -1497,14 +1497,14 @@ function figuraCuerpo(vista, sel = new Set()) {
   const piezas = [
     ['cabeza', 'e', 60, 20, 13, 15], [fr ? 'cara' : 'cabeza', 'e', 60, 24, 9, 9],
     [fr ? 'cuello' : 'cervicales', 'r', 53, 35, 14, 10, 4],
-    [`hombro-${a}`, 'e', 39, 52, 10, 8], [`hombro-${b}`, 'e', 81, 52, 10, 8],
+    [`hombro-${a}`, 'e', 35, 54, 9, 8], [`hombro-${b}`, 'e', 85, 54, 9, 8],
     ...(fr ? [['pecho', 'r', 44, 47, 32, 30, 8], ['abdomen', 'r', 45, 78, 30, 30, 7]]
            : [[`omoplato-${a}`, 'r', 44, 47, 15, 22, 6], [`omoplato-${b}`, 'r', 61, 47, 15, 22, 6], ['dorsales', 'r', 46, 70, 28, 14, 5], ['lumbares', 'r', 45, 85, 30, 23, 6]]),
-    [`brazo-${a}`, 'r', 25, 57, 12, 32, 6], [`brazo-${b}`, 'r', 83, 57, 12, 32, 6],
-    [`codo-${a}`, 'e', 30, 94, 7, 6], [`codo-${b}`, 'e', 90, 94, 7, 6],
-    [`antebrazo-${a}`, 'r', 23, 100, 12, 28, 6], [`antebrazo-${b}`, 'r', 85, 100, 12, 28, 6],
-    [`muneca-${a}`, 'r', 22, 128, 12, 8, 3], [`muneca-${b}`, 'r', 86, 128, 12, 8, 3],
-    [`mano-${a}`, 'e', 27, 144, 8, 10], [`mano-${b}`, 'e', 93, 144, 8, 10],
+    [`brazo-${a}`, 'r', 24, 62, 12, 26, 6], [`brazo-${b}`, 'r', 84, 62, 12, 26, 6],
+    [`codo-${a}`, 'e', 29, 94, 6.5, 6], [`codo-${b}`, 'e', 91, 94, 6.5, 6],
+    [`antebrazo-${a}`, 'r', 20, 100, 13, 31, 6], [`antebrazo-${b}`, 'r', 87, 100, 13, 31, 6],
+    [`muneca-${a}`, 'r', 17, 131, 12, 8, 3], [`muneca-${b}`, 'r', 91, 131, 12, 8, 3],
+    [`mano-${a}`, 'e', 21.5, 147, 7, 9], [`mano-${b}`, 'e', 98.5, 147, 7, 9],
     ...(fr ? [[`cadera-${a}`, 'r', 43, 108, 17, 18, 6], [`cadera-${b}`, 'r', 60, 108, 17, 18, 6]]
            : [[`gluteo-${a}`, 'r', 43, 108, 17, 20, 8], [`gluteo-${b}`, 'r', 60, 108, 17, 20, 8]]),
     ...(fr ? [[`muslo-${a}`, 'r', 44, 127, 15, 44, 7], [`muslo-${b}`, 'r', 61, 127, 15, 44, 7]]
@@ -1513,9 +1513,9 @@ function figuraCuerpo(vista, sel = new Set()) {
            : [[`corva-${a}`, 'e', 51.5, 177, 8, 7], [`corva-${b}`, 'e', 68.5, 177, 8, 7]]),
     ...(fr ? [[`espinilla-${a}`, 'r', 45, 185, 13, 40, 6], [`espinilla-${b}`, 'r', 62, 185, 13, 40, 6]]
            : [[`gemelo-${a}`, 'r', 45, 185, 13, 40, 6], [`gemelo-${b}`, 'r', 62, 185, 13, 40, 6]]),
-    [`tobillo-${a}`, 'r', 45, 226, 13, 8, 3], [`tobillo-${b}`, 'r', 62, 226, 13, 8, 3],
-    ...(fr ? [[`pie-${a}`, 'e', 50, 242, 9, 7], [`pie-${b}`, 'e', 70, 242, 9, 7]]
-           : [[`talon-${a}`, 'e', 51, 240, 7, 6], [`talon-${b}`, 'e', 69, 240, 7, 6]])
+    [`tobillo-${a}`, 'r', 45, 228, 12, 9, 3], [`tobillo-${b}`, 'r', 63, 228, 12, 9, 3],
+    ...(fr ? [[`pie-${a}`, 'e', 49, 245, 8, 6], [`pie-${b}`, 'e', 71, 245, 8, 6]]
+           : [[`talon-${a}`, 'e', 51, 245, 6, 5], [`talon-${b}`, 'e', 69, 245, 6, 5]])
   ];
   return piezas.map(([id, f, x, y, w, h, r]) => {
     const t = `<title>${ZONAS[id]}</title>`;
@@ -1524,9 +1524,32 @@ function figuraCuerpo(vista, sel = new Set()) {
       : `<rect class="zona${sel.has(id) ? ' sel' : ''}" data-z="${id}" x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}">${t}</rect>`;
   }).join('');
 }
+// silueta humana: se dibuja media y se refleja para que sea simétrica
+const MEDIO_CUERPO = 'M60,4 C52,4 47,10 47,19 C47,27 50,33 54,36 C55,37 56,38 56,40 L56,44 C50,46 42,46 37,48 C31,50 28,54 27,60 C25,70 24,80 24,90 C23,100 21,112 20,124 C19,130 18,134 17,138 C14,142 13,150 16,155 C19,158 25,157 27,152 C28,147 28,142 28,138 C29,128 31,114 33,102 C34,90 35,72 38,63 C39,74 41,84 42,92 C41,100 40,106 40,114 C40,128 41,150 43,172 C44,182 44,190 44,200 C44,212 46,224 47,232 C47,236 44,240 42,244 C41,248 45,250 52,250 C56,250 57,246 56,240 C56,230 57,214 57,200 C57,190 56,182 57,172 C58,154 59,136 60,124';
+function siluetaCuerpo(vista) {
+  const espejo = 'transform="translate(120,0) scale(-1,1)"';
+  const base = `<path class="sil" d="${MEDIO_CUERPO} Z"/><path class="sil" d="${MEDIO_CUERPO} Z" ${espejo}/>
+    <path class="sil-borde" d="${MEDIO_CUERPO}"/><path class="sil-borde" d="${MEDIO_CUERPO}" ${espejo}/>`;
+  const frente = `<path class="sil-pelo" d="M47.6,18 C47,8 54,3.6 60,3.6 C66,3.6 73,8 72.4,18 C70,12.5 65,10.5 60,10.5 C55,10.5 50,12.5 47.6,18 Z"/>
+    <g class="sil-det">
+      <ellipse cx="55" cy="19" rx="1.6" ry="1.1"/><ellipse cx="65" cy="19" rx="1.6" ry="1.1"/>
+      <path d="M60,20 L59,25 L61,25"/><path d="M56.5,29 Q60,31 63.5,29"/>
+      <path d="M44,50 Q52,53 59,51 M76,50 Q68,53 61,51"/>
+      <path d="M46,62 Q53,70 59,66 M74,62 Q67,70 61,66"/>
+      <path d="M60,70 L60,100"/><circle cx="60" cy="96" r="1"/>
+      <path d="M48,176 Q51.5,180 55,176 M65,176 Q68.5,180 72,176"/></g>`;
+  const espalda = `<path class="sil-pelo" d="M47.5,19 C47,8 54,4 60,4 C66,4 73,8 72.5,19 C72,25 70,29 67,31 C63,29 57,29 53,31 C50,29 48,25 47.5,19 Z"/>
+    <g class="sil-det">
+      <path d="M60,44 L60,112" stroke-dasharray="2.2 1.8"/>
+      <path d="M45,56 Q50,72 58,66 M75,56 Q70,72 62,66"/>
+      <path d="M44,104 Q52,100 59,104 M76,104 Q68,100 61,104"/>
+      <path d="M60,114 L60,124 M47,124 Q53,130 59,126 M73,124 Q67,130 61,126"/>
+      <path d="M47,190 Q50,200 50,212 M73,190 Q70,200 70,212"/></g>`;
+  return base + (vista === 'frente' ? frente : espalda);
+}
 function mapaCuerpo(sel = [], editable = false, id = 'mc') {
   const s = new Set(sel);
-  const svg = vista => `<figure><svg viewBox="0 0 120 252" role="img" aria-label="Cuerpo visto de ${vista === 'frente' ? 'frente' : 'espaldas'}">${figuraCuerpo(vista, s)}</svg><figcaption>${vista === 'frente' ? 'Delante' : 'Detrás'}<small>${vista === 'frente' ? 'su derecha a la izquierda' : 'su derecha a la derecha'}</small></figcaption></figure>`;
+  const svg = vista => `<figure><svg viewBox="0 0 120 254" role="img" aria-label="Cuerpo visto de ${vista === 'frente' ? 'frente' : 'espaldas'}">${siluetaCuerpo(vista)}${figuraCuerpo(vista, s)}</svg><figcaption>${vista === 'frente' ? 'De frente' : 'De espaldas'}<small>${vista === 'frente' ? 'su derecha queda a tu izquierda' : 'su derecha queda a tu derecha'}</small></figcaption></figure>`;
   return `<div class="mapa ${editable ? 'editable' : ''}" id="${id}">${svg('frente')}${svg('espalda')}</div>
     <div class="zchips" id="${id}-chips">${[...s].map(z => `<span class="zchip">${esc(ZONAS[z] || z)}${editable ? ` <button type="button" aria-label="Quitar ${esc(ZONAS[z] || z)}" data-q="${z}">×</button>` : ''}</span>`).join('') || (editable ? '<small class="muted">Toca en el dibujo las zonas donde tiene molestias.</small>' : '')}</div>`;
 }

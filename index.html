@@ -20,6 +20,7 @@
   --bg:#f2f4f8; --surface:#ffffff; --sunken:#f6f7fb; --ink:#17213a; --muted:#5a6680; --line:#dbe1eb;
   --accent:#24406f; --accent-soft:#e4eaf5; --on-accent:#ffffff;
   --ok:#2c7a49; --warn:#a85f12; --bad:#c0392b; --bad-soft:#fbe7e4;
+  --piel:#efe2d6; --piel-borde:#8a6f5a; --pelo:#6b4a35;
   --f-display:"Red Hat Display",system-ui,-apple-system,"Segoe UI",sans-serif;
   --f-body:"Red Hat Text",system-ui,-apple-system,"Segoe UI",sans-serif;
   color-scheme:light;
@@ -27,7 +28,7 @@
 @media (prefers-color-scheme:dark){:root{
   --bg:#0e1320; --surface:#161e30; --sunken:#111827; --ink:#e5eaf4; --muted:#98a4bd; --line:#28324a;
   --accent:#8fa9e0; --accent-soft:#1d2842; --on-accent:#0e1320;
-  --ok:#6cc48a; --warn:#e3a35c; --bad:#ef7a6c; --bad-soft:#3a1d1b; color-scheme:dark}}
+  --ok:#6cc48a; --warn:#e3a35c; --bad:#ef7a6c; --bad-soft:#3a1d1b; --piel:#4a3d34; --piel-borde:#c9ab92; --pelo:#2a1f18; color-scheme:dark}}
 *{box-sizing:border-box}
 html,body{margin:0}
 body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.45;-webkit-tap-highlight-color:transparent}
@@ -333,10 +334,16 @@ select.pill{padding:6px 10px}
 .mapa svg{width:100%;max-width:170px;height:auto;display:block;margin:0 auto}
 .mapa figcaption{font-size:12.5px;font-weight:700;color:var(--ink);margin-top:2px}
 .mapa figcaption small{display:block;font-weight:400;font-size:10.5px;color:var(--muted)}
-.zona{fill:var(--sunken);stroke:color-mix(in srgb,var(--muted) 55%,var(--line));stroke-width:.8;transition:fill .12s}
+.sil{fill:var(--piel);stroke:none}
+.sil-borde{fill:none;stroke:var(--piel-borde);stroke-width:1.1;stroke-linejoin:round;stroke-linecap:round}
+.sil-pelo{fill:var(--pelo)}
+.sil-det{fill:none;stroke:var(--piel-borde);stroke-width:.7;stroke-linecap:round;opacity:.75}
+.sil-det ellipse,.sil-det circle{fill:var(--piel-borde);stroke:none}
+.zona{fill:var(--accent);fill-opacity:0;stroke:var(--accent);stroke-opacity:.22;stroke-width:.5;stroke-dasharray:1.6 1.4;transition:fill-opacity .12s}
 .mapa.editable .zona{cursor:pointer}
-.mapa.editable .zona:hover{fill:var(--accent-soft)}
-.zona.sel,.mapa.editable .zona.sel:hover{fill:color-mix(in srgb,var(--bad) 70%,var(--surface));stroke:var(--bad)}
+.mapa.editable .zona:hover{fill-opacity:.18;stroke-opacity:.6}
+.zona.sel,.mapa.editable .zona.sel:hover{fill:var(--bad);fill-opacity:.62;stroke:var(--bad);stroke-opacity:1;stroke-dasharray:none}
+.mapa.mini .zona:not(.sel){stroke-opacity:0}
 .zchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .zchip{display:inline-flex;align-items:center;gap:4px;font-size:12.5px;font-weight:600;border-radius:99px;padding:3px 6px 3px 10px;background:var(--bad-soft);color:var(--bad)}
 .zchip button{border:0;background:none;color:inherit;font-size:15px;line-height:1;padding:0 4px;cursor:pointer}
