@@ -271,6 +271,28 @@ select.pill{padding:6px 10px}
 .frase.fiesta{background:color-mix(in srgb,var(--ok) 12%,var(--surface));border:1px solid color-mix(in srgb,var(--ok) 35%,var(--line))}
 .frase.festivo{background:color-mix(in srgb,var(--warn) 12%,var(--surface));border:1px solid color-mix(in srgb,var(--warn) 35%,var(--line))}
 .frase.especial span{font-weight:500;color:var(--muted)}
+/* ficha de cliente y alfabeto */
+.tel{display:grid;grid-template-columns:minmax(0,9.5em) minmax(0,1fr);gap:6px}
+.tel select,.tel input{border:1px solid var(--line);background:var(--sunken);border-radius:10px;padding:10px 8px;width:100%;min-width:0}
+.salud{border:1px solid color-mix(in srgb,var(--warn) 35%,var(--line));background:color-mix(in srgb,var(--warn) 7%,var(--surface));border-radius:12px;padding:10px 12px;margin-top:12px}
+.chk{display:flex;gap:10px;align-items:flex-start;font-size:14px}
+.chk input{width:20px;height:20px;flex:none;margin-top:1px}
+.salud textarea:disabled{opacity:.5}
+.conaz{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:start}
+.azlista{min-width:0}
+.letra{font-family:var(--f-display);font-weight:800;font-size:14px;color:var(--accent);margin:14px 4px 6px;scroll-margin-top:70px}
+.letra:first-child{margin-top:0}
+.az{position:sticky;top:calc(env(safe-area-inset-top,0px) + 8px);display:flex;flex-direction:column;align-items:center;gap:1px;padding:4px 2px;border-radius:99px;background:var(--surface);border:1px solid var(--line);max-height:calc(100vh - 120px);overflow-y:auto;scrollbar-width:none}
+.az button{border:0;background:none;font-size:11.5px;font-weight:700;color:var(--accent);width:24px;height:20px;padding:0;line-height:20px;border-radius:6px}
+.az button:disabled{color:var(--line);cursor:default}
+.az button:not(:disabled):active,.az button:not(:disabled):hover{background:var(--accent-soft)}
+@media (max-height:640px){.az button{height:16px;line-height:16px;font-size:10.5px}}
+.azh{display:flex;gap:4px;overflow-x:auto;padding:8px 0 2px;scrollbar-width:thin}
+.azh button{flex:none;min-width:32px;height:32px;border-radius:8px;border:1px solid var(--line);background:var(--surface);font-weight:700;font-size:13px;color:var(--accent)}
+.azh button:disabled{color:var(--line);background:var(--sunken)}
+.azh button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.results.scroll{max-height:300px;overflow-y:auto}
+.results button small{font-size:12px}
 </style>
 </head>
 <body>

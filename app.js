@@ -376,7 +376,7 @@ async function cargarHistorial() {
   const r = await sb.rpc('historial_clientes');
   if (!r.error) (r.data || []).forEach(h => S.hist[h.cliente_id] = h);
 }
-async function cargarClientes() { const r = await sb.from('clientes').select('*').order('nombre'); if (!r.error) S.clientes = r.data; }
+async function cargarClientes() { const r = await sb.from('clientes').select('*').order('nombre'); if (!r.error) S.clientes = r.data.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')); }
 async function cargarDia() {
   const { a, b } = rangoAgenda();
   const campos = S.vista === 'anio' ? 'id,inicio,fin,estado,trabajador_id,servicio_id,cabina_id,cliente_id' + (hayPrecioLibre() ? ',precio,concepto' : '') : '*';
@@ -1077,7 +1077,7 @@ async function abrirCita(id, idiomaMsg) {
       <dt>Cuándo</dt><dd>${ini.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })} · ${hhmm(ini)}–${hhmm(fin)}</dd>
       <dt>Con</dt><dd>${esc(trab(c.trabajador_id).nombre)}</dd>
       <dt>Cabina</dt><dd>${esc(cab(c.cabina_id).nombre)}</dd>
-      <dt>Teléfono</dt><dd>${esc(cl.telefono || '—')}</dd>
+      <dt>Teléfono</dt><dd>${esc(verTel(cl.telefono, cl.pais_telefono) || '—')}</dd>${cl.fecha_nacimiento ? `<dt>Edad</dt><dd>${edad(cl.fecha_nacimiento)} años</dd>` : ''}${cl.salud ? `<dt>Salud</dt><dd class="warn"><b>${esc(cl.salud)}</b></dd>` : ''}
       ${S.puedeFacturar || c.precio != null ? `<dt>Precio</dt><dd>${eur(precioCita(c))}</dd>` : ''}
       ${c.notas ? `<dt>Notas</dt><dd>${esc(c.notas)}</dd>` : ''}
       ${esRecepcion() ? `<dt>Historial</dt><dd>${lineaHistorial(c.cliente_id)}</dd>` : ''}
@@ -1256,27 +1256,43 @@ function calcFin(h, dur) { return minToT((toMin(h) + (+dur || 30)) % 1440); }
 function pintarCliente() {
   const box = $('#f-cli-box'); if (!box) return;
   if (F.cliente) {
-    box.innerHTML = `<div class="picked"><span class="avatar">${esc(iniciales(F.cliente.nombre))}</span><span class="grow" style="min-width:0"><b>${esc(F.cliente.nombre)}</b><br><small>${lineaHistorial(F.cliente.id) || esc(F.cliente.telefono || '')}</small></span><button class="pill" type="button" onclick="F.cliente=null;pintarCliente()">Cambiar</button></div>`;
+    box.innerHTML = `<div class="picked"><span class="avatar">${esc(iniciales(F.cliente.nombre))}</span><span class="grow" style="min-width:0"><b>${esc(F.cliente.nombre)}</b><br><small>${esc(detalleCliente(F.cliente))}</small>${lineaHistorial(F.cliente.id) ? '<br><small>' + lineaHistorial(F.cliente.id) + '</small>' : ''}${F.cliente.salud ? `<br><small class="warn"><b>Salud:</b> ${esc(F.cliente.salud)}</small>` : ''}</span><button class="pill" type="button" onclick="F.cliente=null;pintarCliente()">Cambiar</button></div>`;
     return;
   }
-  if (F.nuevoNombre !== '' && F.creandoCliente) {
+  if (F.creandoCliente) {
+    const [pila, ...ap] = (F.nuevoNombre || '').split(' ');
     box.innerHTML = `<div class="box info" style="margin-top:0"><b>Cliente nuevo</b>${esRecepcion() ? '' : '<br><small class="muted">Quedará en tu lista. Cuando venga, recepción completará sus datos y lo dará de alta en el centro.</small>'}
-      <div class="field"><label for="nc-nombre">Nombre</label><input id="nc-nombre" value="${esc(F.nuevoNombre)}"></div>
-      <div class="two"><div class="field"><label for="nc-tel">Teléfono</label><input id="nc-tel" inputmode="tel"></div>
-      <div class="field"><label for="nc-lang">Idioma</label><select id="nc-lang">${Object.entries(LANGS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div></div>
+      <div class="two"><div class="field"><label for="nc-nombre">Nombre</label><input id="nc-nombre" value="${esc(pila || '')}" autocomplete="off"></div>
+        <div class="field"><label for="nc-apellidos">Apellidos</label><input id="nc-apellidos" value="${esc(ap.join(' '))}" autocomplete="off"></div></div>
+      <div class="field"><label for="nc-tel-num">Teléfono</label>${campoTel('nc-tel', '', 'ES')}</div>
+      <div class="two"><div class="field"><label for="nc-nac">Fecha de nacimiento</label><input id="nc-nac" type="date"></div>
+        <div class="field"><label for="nc-lang">Idioma</label><select id="nc-lang">${Object.entries(LANGS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div></div>
       <div class="actions" style="margin-top:8px"><button class="ghost" type="button" onclick="F.creandoCliente=false;F.nuevoNombre='';pintarCliente()">Buscar otro</button></div></div>`;
     return;
   }
-  box.innerHTML = `<input id="f-cli-q" type="search" placeholder="Buscar por nombre o teléfono" autocomplete="off" style="border:1px solid var(--line);background:var(--sunken);border-radius:10px;padding:10px 12px;width:100%"><div id="f-cli-res"></div>`;
+  const lista = misClientes();
+  const presentes = new Set(lista.map(c => letraDe(c.nombre)));
+  box.innerHTML = `<input id="f-cli-q" type="search" placeholder="Buscar por nombre o teléfono" autocomplete="off" style="border:1px solid var(--line);background:var(--sunken);border-radius:10px;padding:10px 12px;width:100%">
+    <div class="azh" role="group" aria-label="Buscar por letra">${LETRAS.map(l => `<button type="button" data-l="${l}" ${presentes.has(l) ? '' : 'disabled'}>${l}</button>`).join('')}</div>
+    <div id="f-cli-res"></div>`;
   const q = $('#f-cli-q');
-  q.oninput = () => {
-    const t = q.value.trim().toLowerCase(), res = $('#f-cli-res');
-    if (!t) { res.innerHTML = ''; return; }
-    const m = misClientes().filter(c => c.nombre.toLowerCase().includes(t) || (c.telefono || '').replace(/\s/g, '').includes(t.replace(/\s/g, ''))).slice(0, 6);
-    res.innerHTML = `<div class="results">${m.map(c => `<button type="button" data-id="${c.id}"><b>${esc(c.nombre)}</b> <small class="muted">${esc(c.telefono || '')}</small>${pendienteAlta(c) ? ' <small class="warn">· pendiente de alta</small>' : ''}${esRecepcion() && S.hist[c.id] && +S.hist[c.id].no_vino >= 2 ? ' <small class="bad">· ' + S.hist[c.id].no_vino + ' no vino</small>' : ''}</button>`).join('')}<button type="button" data-new="1">+ Crear «${esc(q.value.trim())}» como cliente nuevo</button></div>`;
+  const fila = c => `<button type="button" data-id="${c.id}"><b>${esc(c.nombre)}</b>${nombreRepetido(c) ? ' <small class="warn">· nombre repetido</small>' : ''}<br><small class="muted">${esc(detalleCliente(c) || 'Sin teléfono ni fecha de nacimiento')}</small>${pendienteAlta(c) ? ' <small class="warn">· pendiente de alta</small>' : ''}${esRecepcion() && S.hist[c.id] && +S.hist[c.id].no_vino >= 2 ? ' <small class="bad">· ' + S.hist[c.id].no_vino + ' no vino</small>' : ''}</button>`;
+  const pintar = (m, nuevo) => {
+    const res = $('#f-cli-res');
+    res.innerHTML = `<div class="results scroll">${m.map(fila).join('')}${nuevo ? `<button type="button" data-new="1">+ Crear «${esc(nuevo)}» como cliente nuevo</button>` : '<button type="button" data-new="1">+ Cliente nuevo</button>'}</div>`;
     res.querySelectorAll('button[data-id]').forEach(b => b.onclick = () => { F.cliente = cli(b.dataset.id); pintarCliente(); });
-    res.querySelector('button[data-new]').onclick = () => { F.nuevoNombre = q.value.trim(); F.creandoCliente = true; pintarCliente(); };
+    res.querySelector('button[data-new]').onclick = () => { F.nuevoNombre = nuevo || ''; F.creandoCliente = true; pintarCliente(); };
   };
+  q.oninput = () => {
+    const t = normNombre(q.value), td = q.value.replace(/\D/g, '');
+    box.querySelectorAll('.azh button').forEach(b => b.removeAttribute('aria-pressed'));
+    if (!t) { $('#f-cli-res').innerHTML = ''; return; }
+    pintar(lista.filter(c => normNombre(c.nombre).includes(t) || (td.length >= 3 && (c.telefono || '').includes(td))).slice(0, 30), q.value.trim());
+  };
+  box.querySelectorAll('.azh button').forEach(b => b.onclick = () => {
+    box.querySelectorAll('.azh button').forEach(x => x.setAttribute('aria-pressed', x === b)); q.value = '';
+    pintar(lista.filter(c => letraDe(c.nombre) === b.dataset.l), '');
+  });
 }
 async function guardarCita() {
   const err = $('#f-err'); err.textContent = '';
@@ -1306,11 +1322,16 @@ async function guardarCita() {
   const fin = () => { btn.disabled = false; btn.textContent = 'Guardar cita'; };
   let clienteId = F.cliente ? F.cliente.id : null;
   if (!clienteId) {
-    const nombre = ($('#nc-nombre').value || '').trim();
-    if (!nombre) { err.textContent = 'Escribe el nombre del cliente.'; fin(); return; }
-    const r = await sb.from('clientes').insert({ nombre, telefono: $('#nc-tel').value.trim() || null, idioma: $('#nc-lang').value }).select().single();
+    const pila = ($('#nc-nombre').value || '').trim(), apell = ($('#nc-apellidos').value || '').trim(), nombre = [pila, apell].filter(Boolean).join(' ');
+    if (!pila) { err.textContent = 'Escribe el nombre del cliente.'; fin(); return; }
+    const tl = leerTel('nc-tel'); if (tl.error) { err.textContent = tl.error; fin(); return; }
+    const fnac = $('#nc-nac').value || null;
+    if (!(await confirmarDuplicado(nombre, fnac))) { fin(); return; }
+    const nuevoC = { nombre, telefono: tl.telefono, idioma: $('#nc-lang').value };
+    if (hayFicha()) Object.assign(nuevoC, { nombre_pila: pila, apellidos: apell || null, pais_telefono: tl.pais_telefono, fecha_nacimiento: fnac });
+    const r = await sb.from('clientes').insert(nuevoC).select().single();
     if (r.error) { err.textContent = traducirError(r.error); fin(); return; }
-    S.clientes.push(r.data); S.clientes.sort((a, b) => a.nombre.localeCompare(b.nombre));
+    S.clientes.push(r.data); S.clientes.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
     F.cliente = r.data; F.creandoCliente = false; clienteId = r.data.id;
   }
   const ini = new Date(F.fecha + 'T' + F.hora), dur = durForm();
@@ -1352,27 +1373,113 @@ async function todoRecibido() {
   S.avisos = S.avisos.filter(a => !paraMi(a)); pintarCampana(); renderVista(); closeSheet(); toast('Todo marcado como recibido');
 }
 
+
+/* ================= teléfonos, nombres y alfabeto ================= */
+const PAISES = [
+  ['ES', 'España', '34'], ['NO', 'Noruega', '47'], ['GB', 'Reino Unido', '44'], ['DE', 'Alemania', '49'], ['FR', 'Francia', '33'],
+  ['NL', 'Países Bajos', '31'], ['BE', 'Bélgica', '32'], ['SE', 'Suecia', '46'], ['DK', 'Dinamarca', '45'], ['FI', 'Finlandia', '358'],
+  ['IS', 'Islandia', '354'], ['IE', 'Irlanda', '353'], ['IT', 'Italia', '39'], ['PT', 'Portugal', '351'], ['CH', 'Suiza', '41'],
+  ['AT', 'Austria', '43'], ['LU', 'Luxemburgo', '352'], ['PL', 'Polonia', '48'], ['CZ', 'Chequia', '420'], ['SK', 'Eslovaquia', '421'],
+  ['HU', 'Hungría', '36'], ['RO', 'Rumanía', '40'], ['BG', 'Bulgaria', '359'], ['GR', 'Grecia', '30'], ['HR', 'Croacia', '385'],
+  ['SI', 'Eslovenia', '386'], ['LT', 'Lituania', '370'], ['LV', 'Letonia', '371'], ['EE', 'Estonia', '372'], ['UA', 'Ucrania', '380'],
+  ['RU', 'Rusia', '7'], ['TR', 'Turquía', '90'], ['IL', 'Israel', '972'], ['MA', 'Marruecos', '212'], ['DZ', 'Argelia', '213'],
+  ['US', 'Estados Unidos / Canadá', '1'], ['MX', 'México', '52'], ['AR', 'Argentina', '54'], ['CO', 'Colombia', '57'], ['VE', 'Venezuela', '58'],
+  ['PE', 'Perú', '51'], ['CL', 'Chile', '56'], ['EC', 'Ecuador', '593'], ['UY', 'Uruguay', '598'], ['BR', 'Brasil', '55'],
+  ['CU', 'Cuba', '53'], ['DO', 'República Dominicana', '1809'], ['CN', 'China', '86'], ['IN', 'India', '91'], ['AU', 'Australia', '61']
+];
+const paisDe = code => PAISES.find(p => p[0] === code) || PAISES[0];
+// separa un teléfono internacional (+447700…) en país y número
+function partirTel(tel, paisPorDefecto = 'ES') {
+  const t = String(tel || '').replace(/[^\d+]/g, '');
+  if (t.startsWith('+') || t.startsWith('00')) {
+    const dig = t.replace(/^\+|^00/, '');
+    const p = [...PAISES].sort((a, b) => b[2].length - a[2].length).find(x => dig.startsWith(x[2]));
+    if (p) return { pais: p[0], num: dig.slice(p[2].length) };
+    return { pais: paisPorDefecto, num: dig };
+  }
+  return { pais: paisPorDefecto, num: t };
+}
+function verTel(tel, pais) {
+  if (!tel) return '';
+  const { pais: p, num } = partirTel(tel, pais || 'ES');
+  return `+${paisDe(p)[2]} ${num.replace(/(\d{3})(?=\d{2,})/g, '$1 ')}`.trim();
+}
+// selector de país + número
+function campoTel(id, tel, pais) {
+  const { pais: p, num } = partirTel(tel, pais || 'ES');
+  return `<div class="tel"><select id="${id}-pais" aria-label="País del teléfono">${PAISES.map(x => `<option value="${x[0]}" ${x[0] === p ? 'selected' : ''}>${x[0]} +${x[2]} · ${x[1]}</option>`).join('')}</select>
+    <input id="${id}-num" inputmode="tel" autocomplete="tel-national" placeholder="Número" value="${esc(num)}" oninput="detectarPais('${id}')"></div>`;
+}
+function detectarPais(id) {
+  const inp = $('#' + id + '-num'), v = inp.value.trim();
+  if (/^(\+|00)\d{1,4}/.test(v)) { const r = partirTel(v); const sel = $('#' + id + '-pais'); if (r.pais !== sel.value || v.startsWith('+') || v.startsWith('00')) { sel.value = r.pais; inp.value = r.num; } }
+}
+function leerTel(id) {
+  const pais = $('#' + id + '-pais').value, num = $('#' + id + '-num').value.replace(/\D/g, '').replace(/^0+(?=\d{9,})/, '');
+  if (!num) return { telefono: null, pais_telefono: pais };
+  if (num.length < 6 || num.length > 13) return { error: 'Revisa el teléfono: el número (sin prefijo) debe tener entre 6 y 13 cifras.' };
+  return { telefono: '+' + paisDe(pais)[2] + num, pais_telefono: pais };
+}
+const hayFicha = () => S.clientes.some(c => 'nombre_pila' in c);
+const sinAcentos = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '');
+const normNombre = s => sinAcentos(s).toLowerCase().replace(/\s+/g, ' ').trim();
+const LETRAS = 'ABCDEFGHIJKLMNÑOPQRSTUVWXYZ#'.split('');
+function letraDe(nombre) {
+  const c = String(nombre || '').trim().charAt(0).toUpperCase();
+  if (c === 'Ñ') return 'Ñ';
+  const b = sinAcentos(c);
+  return /[A-Z]/.test(b) ? b : '#';
+}
+const edad = f => { if (!f) return null; const d = new Date(f + 'T12:00'), h = new Date(); let e = h.getFullYear() - d.getFullYear(); if (h < new Date(h.getFullYear(), d.getMonth(), d.getDate())) e--; return e; };
+const fechaNac = f => f ? new Date(f + 'T12:00').toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+function detalleCliente(c) { return [c.fecha_nacimiento ? `${fechaNac(c.fecha_nacimiento)} (${edad(c.fecha_nacimiento)} años)` : '', verTel(c.telefono, c.pais_telefono)].filter(Boolean).join(' · '); }
+function duplicadosDe(nombre, exceptoId) { const n = normNombre(nombre); return S.clientes.filter(c => c.id !== exceptoId && normNombre(c.nombre) === n); }
+const nombreRepetido = c => S.clientes.some(x => x.id !== c.id && normNombre(x.nombre) === normNombre(c.nombre));
+// pregunta si es otra persona cuando ya hay alguien con el mismo nombre
+async function confirmarDuplicado(nombre, fnac, exceptoId) {
+  const d = duplicadosDe(nombre, exceptoId);
+  if (!d.length) return true;
+  const misma = fnac && d.some(c => c.fecha_nacimiento === fnac);
+  return preguntar(misma ? 'Mismo nombre y misma fecha de nacimiento' : 'Ya hay un cliente con este nombre',
+    `${d.length === 1 ? 'Ya existe' : `Ya existen ${d.length}`}: ${d.map(c => `${c.nombre}${detalleCliente(c) ? ' (' + detalleCliente(c) + ')' : ''}`).join('; ')}. ${misma ? 'Comprueba el teléfono antes de seguir. ' : ''}¿Seguro que es una persona distinta?`,
+    'Sí, es otra persona', 'No, revisar', misma);
+}
+// barra A–Z: salta a la letra en la lista
+function barraAZ(presentes, accion) {
+  return `<nav class="az" aria-label="Ir a la letra">${LETRAS.map(l => `<button type="button" ${presentes.has(l) ? '' : 'disabled'} onclick="${accion}('${l}')">${l}</button>`).join('')}</nav>`;
+}
+function irALetra(l) {
+  const el = document.getElementById('letra-' + l); if (!el) return;
+  const y = el.getBoundingClientRect().top + window.scrollY - 70;
+  window.scrollTo({ top: y, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+}
+
 /* ================= clientes (recepción) ================= */
 function filaCliente(c) {
   const h = S.hist[c.id], nv = h ? +h.no_vino : 0, ta = h && h.tarde != null ? +h.tarde : null;
   const sub = esRecepcion()
     ? (h ? `${+h.visitas} visitas · ${+h.canceladas} canceladas · ${nv} no vino${ta != null ? ' · ' + ta + ' tarde' : ''}` : 'Sin visitas todavía')
     : (pendienteAlta(c) ? 'Pendiente de alta en recepción' : 'Dado de alta en el centro');
-  return `<button class="row" onclick="abrirCliente('${c.id}')"><span class="avatar">${esc(iniciales(c.nombre))}</span><span class="main"><b>${esc(c.nombre)}</b><small class="${esRecepcion() && nv >= 2 ? 'bad' : (!esRecepcion() && pendienteAlta(c) ? 'warn' : '')}">${sub}</small></span>${esRecepcion() && pendienteAlta(c) ? '<span class="tag warn">Pendiente</span>' : ''}<span class="lang">${esc((c.idioma || 'es').toUpperCase())}</span></button>`;
+  const det = detalleCliente(c);
+  return `<button class="row" onclick="abrirCliente('${c.id}')"><span class="avatar">${esc(iniciales(c.nombre))}</span><span class="main"><b>${esc(c.nombre)}${nombreRepetido(c) ? ' <small class="warn">· nombre repetido</small>' : ''}</b><small class="${esRecepcion() && nv >= 2 ? 'bad' : (!esRecepcion() && pendienteAlta(c) ? 'warn' : '')}">${sub}</small>${det ? `<small class="muted" style="display:block">${esc(det)}</small>` : ''}</span>${esRecepcion() && pendienteAlta(c) ? '<span class="tag warn">Pendiente</span>' : ''}<span class="lang">${esc((c.idioma || 'es').toUpperCase())}</span></button>`;
 }
 function vistaClientes() {
-  const t = S.q.trim().toLowerCase();
-  const coincide = c => !t || c.nombre.toLowerCase().includes(t) || (c.telefono || '').replace(/\s/g, '').includes(t.replace(/\s/g, ''));
-  const base = misClientes().filter(coincide);
+  const t = normNombre(S.q), td = S.q.replace(/\D/g, '');
+  const coincide = c => !t || normNombre(c.nombre).includes(t) || (td.length >= 3 && (c.telefono || '').includes(td));
+  const base = misClientes().filter(coincide).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
   const pend = esRecepcion() ? base.filter(pendienteAlta) : [];
   const l = esRecepcion() ? base.filter(c => !pendienteAlta(c)) : base;
+  const grupos = {}; l.forEach(c => (grupos[letraDe(c.nombre)] = grupos[letraDe(c.nombre)] || []).push(c));
+  const presentes = new Set(Object.keys(grupos));
   return `<div class="toolbar"><input id="q" type="search" placeholder="Buscar por nombre o teléfono" value="${esc(S.q)}" oninput="S.q=this.value;mantenerFoco('q')"><button class="primary" onclick="abrirCliente()">+ Cliente</button></div>
   ${pend.length ? `<div class="sect" style="margin-top:6px">Pendientes de alta (${pend.length})</div>
     <p class="note" style="margin-top:0">Los han apuntado los trabajadores. Cuando el cliente venga, completa sus datos y dalo de alta, o únelo con su ficha si ya existía.</p>
-    <div class="list">${pend.map(filaCliente).join('')}</div><div class="sect">Clientes del centro</div>` : ''}
-  ${!esRecepcion() ? `<p class="note" style="margin-top:0">Aquí solo están los clientes que has creado tú. La lista completa del centro la gestiona recepción.</p>` : ''}
-  <div class="list">${l.map(filaCliente).join('') || `<p class="row muted">${t ? 'Ningún cliente coincide con la búsqueda.' : esRecepcion() ? 'Aún no hay clientes.' : 'Todavía no has creado clientes. Puedes hacerlo al dar una cita o con «+ Cliente».'}</p>`}</div>
-  <p class="note">${esRecepcion() ? 'En rojo, clientes con 2 o más ausencias. ' : ''}Esta agenda no guarda historia clínica: eso sigue en el programa de pacientes del centro.</p>`;
+    <div class="list">${pend.map(filaCliente).join('')}</div><div class="sect">Clientes del centro (${l.length})</div>` : `<p class="note" style="margin-top:0">${l.length} ${l.length === 1 ? 'cliente' : 'clientes'}${t ? ' encontrados' : ''}.${!esRecepcion() ? ' Aquí solo están los clientes que has creado tú; la lista completa del centro la gestiona recepción.' : ''}</p>`}
+  <div class="conaz">
+    <div class="azlista">${LETRAS.filter(x => grupos[x]).map(x => `<div class="letra" id="letra-${x}">${x}</div><div class="list">${grupos[x].map(filaCliente).join('')}</div>`).join('') || `<div class="list"><p class="row muted">${t ? 'Ningún cliente coincide con la búsqueda.' : esRecepcion() ? 'Aún no hay clientes.' : 'Todavía no has creado clientes. Puedes hacerlo al dar una cita o con «+ Cliente».'}</p></div>`}</div>
+    ${l.length > 8 ? barraAZ(presentes, 'irALetra') : ''}
+  </div>
+  <p class="note">${esRecepcion() ? 'En rojo, clientes con 2 o más ausencias. ' : ''}Toca una letra para saltar a los clientes que empiezan por ella.</p>`;
 }
 function mantenerFoco(id) { const el = $('#' + id), p = el.selectionStart; renderVista(); const n = $('#' + id); n.focus(); try { n.setSelectionRange(p, p); } catch (e) { } }
 async function abrirCliente(id) {
@@ -1381,23 +1488,55 @@ async function abrirCliente(id) {
   if (id) { const r = await sb.from('citas').select('*').eq('cliente_id', id).order('inicio', { ascending: false }).limit(60); citas = r.data || []; }
   if (esRecepcion() && id && pendienteAlta(c) && !S.vinculadosUsuarios) { const rp = await sb.from('perfiles').select('user_id,trabajador_id'); S.vinculadosUsuarios = {}; (rp.data || []).forEach(x => S.vinculadosUsuarios[x.user_id] = x.trabajador_id); }
   const puedeEditar = esRecepcion() || !id || (c.creado_por === S.user.id && pendienteAlta(c));
-  sheet(`<h3>${id ? esc(c.nombre) : 'Cliente nuevo'}</h3>${id ? `<p style="margin:0">${lineaHistorial(id)}</p>` : ''}
+  sheet(`<h3>${id ? esc(c.nombre) : 'Cliente nuevo'}</h3>${id && detalleCliente(c) ? `<p class="muted" style="margin:0">${esc(detalleCliente(c))}</p>` : ''}${id ? `<p style="margin:2px 0 0">${lineaHistorial(id)}</p>` : ''}
+    ${id && nombreRepetido(c) ? `<div class="box warnb">Hay otro cliente con el mismo nombre. Comprueba la fecha de nacimiento o el teléfono para no confundirlos.</div>` : ''}
     ${id && pendienteAlta(c) && esRecepcion() ? `<div class="box warnb"><b>Pendiente de alta.</b> Lo apuntó ${esc((S.trabajadores.find(t => S.vinculadosUsuarios && S.vinculadosUsuarios[c.creado_por] === t.id) || {}).nombre || 'un trabajador')}. Revisa sus datos con el cliente y dalo de alta, o únelo con su ficha si ya existía.
       <div class="actions" style="margin-top:8px"><button class="primary" onclick="darDeAlta('${id}')">Dar de alta</button><button class="ghost" onclick="unirCliente('${id}')">Ya existe: unir</button></div></div>` : ''}
     ${id && !esRecepcion() ? `<div class="box ${pendienteAlta(c) ? 'warnb' : 'info'}">${pendienteAlta(c) ? 'Pendiente de alta: recepción completará sus datos cuando venga. Mientras tanto puedes corregirlos.' : 'Dado de alta en el centro. Para cambiar sus datos, habla con recepción.'}</div>` : ''}
-    <div class="field"><label for="c-nombre">Nombre</label><input id="c-nombre" value="${esc(c.nombre)}"></div>
-    <div class="two"><div class="field"><label for="c-tel">Teléfono</label><input id="c-tel" inputmode="tel" value="${esc(c.telefono || '')}"></div>
-      <div class="field"><label for="c-lang">Idioma</label><select id="c-lang">${Object.entries(LANGS).map(([k, v]) => `<option value="${k}" ${k === (c.idioma || 'es') ? 'selected' : ''}>${v}</option>`).join('')}</select></div></div>
-    <div class="field"><label for="c-email">Email</label><input id="c-email" type="email" value="${esc(c.email || '')}"></div>
-    <div class="field"><label for="c-notas">Notas (preferencias; sin datos clínicos)</label><textarea id="c-notas" rows="2">${esc(c.notas || '')}</textarea></div>
+    ${formCliente(c)}
     <div class="err" id="c-err"></div>
     <div class="actions"><button class="ghost" onclick="closeSheet()">Cerrar</button>${puedeEditar ? `<button class="primary" onclick="guardarCliente(${id ? `'${id}'` : 'null'})">Guardar</button>` : ''}</div>
     ${id ? `<div class="actions" style="margin-top:8px"><button class="ghost" onclick="closeSheet();abrirFormulario(null,{cliente_id:'${id}'})">Nueva cita para este cliente</button></div>
     <div class="sect">Historial</div><div class="list">${citas.map(x => `<button class="row" onclick="verCitaAviso('${x.id}')"><span class="main"><b>${esc(nombreCita(x))}</b><small>${new Date(x.inicio).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: '2-digit' })} ${hhmm(new Date(x.inicio))} · ${esc(trab(x.trabajador_id).nombre)}</small></span><span class="end ${x.estado === 'no vino' ? 'bad' : x.estado === 'cancelada' ? 'warn' : x.estado === 'realizada' ? 'ok' : ''}">${ESTADOS[x.estado]}</span></button>`).join('') || '<p class="row muted">Sin citas todavía.</p>'}</div>` : ''}`);
 }
+function formCliente(c) {
+  const ficha = hayFicha();
+  const pila = ficha ? (c.nombre_pila ?? (c.nombre || '').split(' ')[0]) : c.nombre;
+  const apell = ficha ? (c.apellidos ?? (c.nombre || '').split(' ').slice(1).join(' ')) : '';
+  return `${ficha ? `<div class="two"><div class="field"><label for="c-nombre">Nombre *</label><input id="c-nombre" value="${esc(pila || '')}" autocomplete="off"></div>
+      <div class="field"><label for="c-apellidos">Apellidos *</label><input id="c-apellidos" value="${esc(apell || '')}" autocomplete="off"></div></div>
+    <div class="two"><div class="field"><label for="c-nac">Fecha de nacimiento</label><input id="c-nac" type="date" value="${esc(c.fecha_nacimiento || '')}"></div>
+      <div class="field"><label for="c-sexo">Sexo</label><select id="c-sexo"><option value="">—</option>${[['mujer', 'Mujer'], ['hombre', 'Hombre'], ['otro', 'Otro'], ['nd', 'Prefiere no decirlo']].map(([k, v]) => `<option value="${k}" ${c.sexo === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div></div>`
+    : `<div class="field"><label for="c-nombre">Nombre y apellidos</label><input id="c-nombre" value="${esc(c.nombre || '')}"></div>`}
+    <div class="field"><label for="c-tel-num">Teléfono</label>${campoTel('c-tel', c.telefono, c.pais_telefono)}<small class="muted">Elige el país o pega el número con su prefijo (+44…) y se detecta solo.</small></div>
+    <div class="two"><div class="field"><label for="c-email">Email</label><input id="c-email" type="email" value="${esc(c.email || '')}"></div>
+      <div class="field"><label for="c-lang">Idioma</label><select id="c-lang">${Object.entries(LANGS).map(([k, v]) => `<option value="${k}" ${k === (c.idioma || 'es') ? 'selected' : ''}>${v}</option>`).join('')}</select></div></div>
+    ${ficha ? `<div class="field"><label for="c-dir">Dirección</label><input id="c-dir" value="${esc(c.direccion || '')}" placeholder="Calle, número, población"></div>
+    <div class="salud">
+      <label class="chk"><input type="checkbox" id="c-cons" ${c.consentimiento_salud ? 'checked' : ''} onchange="$('#c-salud').disabled=!this.checked"> <span><b>El cliente da su consentimiento</b> para guardar datos de salud relevantes para el tratamiento${c.consentimiento_salud_en ? ` <small class="muted">(desde ${fechaCorta(c.consentimiento_salud_en)})</small>` : ''}</span></label>
+      <div class="field"><label for="c-salud">Salud: alergias, lesiones, dolencias o contraindicaciones</label><textarea id="c-salud" rows="3" ${c.consentimiento_salud ? '' : 'disabled'} placeholder="Ej.: alergia al látex, operado de rodilla en 2022, embarazo…">${esc(c.salud || '')}</textarea>
+      <small class="muted">Solo lo ven recepción y quien atiende a este cliente.</small></div></div>` : ''}
+    <div class="field"><label for="c-notas">Notas y preferencias</label><textarea id="c-notas" rows="2" placeholder="Prefiere tardes, presión suave…">${esc(c.notas || '')}</textarea></div>`;
+}
+function datosFormCliente(orig = {}) {
+  const tl = leerTel('c-tel'); if (tl.error) return { error: tl.error };
+  if (!hayFicha()) { const nombre = $('#c-nombre').value.trim(); if (!nombre) return { error: 'Escribe el nombre.' }; return { d: { nombre, telefono: tl.telefono, idioma: $('#c-lang').value, email: $('#c-email').value.trim() || null, notas: $('#c-notas').value.trim() || null } }; }
+  const pila = $('#c-nombre').value.trim(), apell = $('#c-apellidos').value.trim();
+  if (!pila) return { error: 'Escribe el nombre.' };
+  if (!apell) return { error: 'Escribe al menos un apellido: ayuda a distinguir clientes con el mismo nombre.' };
+  const cons = $('#c-cons').checked, salud = $('#c-salud').value.trim();
+  return { d: {
+    nombre: pila + ' ' + apell, nombre_pila: pila, apellidos: apell,
+    telefono: tl.telefono, pais_telefono: tl.pais_telefono, idioma: $('#c-lang').value, email: $('#c-email').value.trim() || null,
+    fecha_nacimiento: $('#c-nac').value || null, sexo: $('#c-sexo').value || null, direccion: $('#c-dir').value.trim() || null,
+    consentimiento_salud: cons, salud: cons ? (salud || null) : null,
+    consentimiento_salud_en: cons ? (orig.consentimiento_salud_en || new Date().toISOString()) : null,
+    notas: $('#c-notas').value.trim() || null } };
+}
 async function darDeAlta(id) {
-  const d = { nombre: $('#c-nombre').value.trim(), telefono: $('#c-tel').value.trim() || null, idioma: $('#c-lang').value, email: $('#c-email').value.trim() || null, notas: $('#c-notas').value.trim() || null, validado: true };
-  if (!d.nombre) { $('#c-err').textContent = 'Escribe el nombre.'; return; }
+  const fd = datosFormCliente(cli(id)); if (fd.error) { $('#c-err').textContent = fd.error; return; }
+  const d = { ...fd.d, validado: true };
+  if (!(await confirmarDuplicado(d.nombre, d.fecha_nacimiento, id))) return;
   const r = await sb.from('clientes').update(d).eq('id', id).select().maybeSingle();
   if (r.error || !r.data) { $('#c-err').textContent = r.error ? traducirError(r.error) : 'No tienes permiso.'; return; }
   await cargarClientes(); closeSheet(); renderVista(); toast('Cliente dado de alta en el centro');
@@ -1424,8 +1563,10 @@ function unirCliente(id) {
   $('#u-q').oninput = pintar; pintar();
 }
 async function guardarCliente(id) {
-  const d = { nombre: $('#c-nombre').value.trim(), telefono: $('#c-tel').value.trim() || null, idioma: $('#c-lang').value, email: $('#c-email').value.trim() || null, notas: $('#c-notas').value.trim() || null };
-  if (!d.nombre) { $('#c-err').textContent = 'Escribe el nombre.'; return; }
+  const orig = id ? cli(id) : {};
+  const fd = datosFormCliente(orig); if (fd.error) { $('#c-err').textContent = fd.error; return; }
+  const d = fd.d;
+  if ((!id || normNombre(orig.nombre) !== normNombre(d.nombre)) && !(await confirmarDuplicado(d.nombre, d.fecha_nacimiento, id))) return;
   const r = id ? await sb.from('clientes').update(d).eq('id', id).select().maybeSingle() : await sb.from('clientes').insert(d).select().single();
   if (r.error || !r.data) { $('#c-err').textContent = r.error ? traducirError(r.error) : 'No tienes permiso.'; return; }
   await cargarClientes(); closeSheet(); renderVista(); toast('Cliente guardado');
