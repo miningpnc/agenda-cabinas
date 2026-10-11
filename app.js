@@ -79,13 +79,48 @@ function notificarSistema(titulo, cuerpo) {
     } else new Notification(titulo, { body: cuerpo });
   } catch (e) { }
 }
+const esIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const instalada = () => window.matchMedia && (matchMedia('(display-mode: standalone)').matches || navigator.standalone === true);
+const pushPosible = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && !!CFG.vapidPublicKey;
+function claveVapid(b64) { const p = '='.repeat((4 - b64.length % 4) % 4), raw = atob((b64 + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from([...raw].map(c => c.charCodeAt(0))); }
+// apunta este dispositivo para recibir avisos aunque la app esté cerrada
+async function suscribirPush(silencioso = false) {
+  if (!pushPosible() || Notification.permission !== 'granted' || !S.user) return false;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: claveVapid(CFG.vapidPublicKey) });
+    const disp = (esIOS() ? 'iPhone/iPad' : /android/i.test(navigator.userAgent) ? 'Android' : 'Ordenador') + ' · ' + new Date().toLocaleDateString('es-ES');
+    const r = await sb.rpc('guardar_suscripcion', { p_datos: sub.toJSON(), p_dispositivo: disp });
+    if (r.error) { if (!silencioso) toast(/guardar_suscripcion/.test(r.error.message) ? 'Falta ejecutar la actualización 5 en Supabase' : r.error.message); return false; }
+    S.pushActivo = true; return true;
+  } catch (e) { if (!silencioso) toast('No se pudo activar en este dispositivo: ' + (e.message || e)); return false; }
+}
 async function activarNotificaciones() {
+  if (esIOS() && !instalada()) {
+    sheet(`<h3>Primero, instala la app</h3><p>En iPhone los avisos solo llegan si la agenda está en la pantalla de inicio:</p>
+      <ol><li>Abre esta página en <b>Safari</b>.</li><li>Pulsa <b>Compartir</b> (el cuadrado con la flecha).</li><li>Elige <b>Añadir a pantalla de inicio</b>.</li><li>Abre la agenda desde el icono nuevo y vuelve a pulsar «Activar».</li></ol>
+      <div class="actions"><button class="primary" onclick="closeSheet()">Entendido</button></div>`);
+    return;
+  }
   if (!('Notification' in window)) { toast('Este navegador no permite notificaciones'); return; }
   try {
     const r = await Notification.requestPermission();
-    toast(r === 'granted' ? 'Notificaciones activadas en este dispositivo' : 'Notificaciones no permitidas');
+    if (r !== 'granted') { toast('Notificaciones no permitidas en este dispositivo'); render(); return; }
+    const ok = await suscribirPush();
+    toast(ok ? 'Listo: este dispositivo recibirá avisos aunque la app esté cerrada' : 'Notificaciones activadas con la app abierta');
     render();
   } catch (e) { toast('No se pudieron activar'); }
+}
+async function avisoPrueba(correo) {
+  const r = await sb.functions.invoke('enviar-aviso', { body: { prueba: true, correo } });
+  if (r.error) { toast('El servidor de avisos aún no está configurado (función «enviar-aviso»).'); return; }
+  const d = r.data || {};
+  toast(`Enviado: ${d.push || 0} aviso${d.push === 1 ? '' : 's'} al móvil${correo ? ` y ${d.correos || 0} correo${d.correos === 1 ? '' : 's'}` : ''}. Puede tardar unos segundos.`);
+}
+async function cerrarSesion() {
+  try { if (pushPosible()) { const reg = await navigator.serviceWorker.getRegistration(); const sub = reg && await reg.pushManager.getSubscription(); if (sub) await sb.rpc('borrar_suscripcion', { p_endpoint: sub.endpoint }); } } catch (e) { }
+  sb.auth.signOut();
 }
 try { if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => { }); } catch (e) { }
 
@@ -282,7 +317,7 @@ function pantallaSinPerfil() {
   $('#app').innerHTML = `<div class="center"><div class="card"><h2>Tu usuario aún no está dado de alta</h2>
   <p class="muted">Has entrado como <b>${esc(S.user.email)}</b>, pero recepción todavía no te ha añadido al equipo con este email.</p>
   <p class="muted">Pide que te den de alta con exactamente este email y vuelve a comprobarlo.</p>
-  <div class="actions"><button class="ghost" onclick="sb.auth.signOut()">Salir</button><button class="primary" onclick="iniciarApp()">Volver a comprobar</button></div></div></div>`;
+  <div class="actions"><button class="ghost" onclick="cerrarSesion()">Salir</button><button class="primary" onclick="iniciarApp()">Volver a comprobar</button></div></div></div>`;
 }
 
 async function iniciarApp() {
@@ -296,6 +331,7 @@ async function iniciarApp() {
   await Promise.all([cargarDia(), cargarAvisos()]);
   elegirFrase();
   suscribir();
+  suscribirPush(true).then(ok => { if (ok && (S.tab === 'cuenta' || S.tab === 'ajustes')) renderVista(); });
   render();
 }
 
@@ -1468,9 +1504,10 @@ function vistaCuenta() {
   const permiso = 'Notification' in window ? Notification.permission : 'denied';
   return `<div class="sect">Este dispositivo</div>
   <div class="list"><div class="row"><span class="main"><b>${esc(S.user.email)}</b><small>${esRecepcion() ? 'Recepción' : 'Trabajador · ' + esc(yo()?.nombre || '')}</small></span></div>
-  <div class="row"><span class="main"><b>Notificaciones</b><small>${permiso === 'granted' ? 'Activadas: te avisará al llegar una cita con la app abierta o en segundo plano.' : permiso === 'denied' ? 'Bloqueadas en los ajustes del navegador.' : 'Desactivadas.'}</small></span>${permiso === 'default' ? '<button class="pill" onclick="activarNotificaciones()">Activar</button>' : ''}</div>
+  <div class="row"><span class="main"><b>Avisos en este dispositivo</b><small>${permiso === 'granted' ? (S.pushActivo ? 'Activados: te llegarán aunque la app esté cerrada o el móvil bloqueado.' : 'Activados con la app abierta. Pulsa «Activar» para recibirlos también con la app cerrada.') : permiso === 'denied' ? 'Bloqueados en los ajustes del navegador o del móvil.' : esIOS() && !instalada() ? 'En iPhone, primero añade la app a la pantalla de inicio.' : 'Desactivados.'}</small></span>${permiso !== 'denied' && !S.pushActivo ? '<button class="pill" onclick="activarNotificaciones()">Activar</button>' : ''}</div>
+  ${S.pushActivo ? '<div class="row"><span class="main"><b>Probar avisos</b><small>Te envía un aviso de prueba a ti.</small></span><span style="display:grid;gap:6px"><button class="pill" onclick="avisoPrueba(false)">Al móvil</button><button class="pill" onclick="avisoPrueba(true)">Móvil y correo</button></span></div>' : ''}
   <div class="row"><span class="main"><b>Probar sonido de alarma</b><small>El que suena cuando dos trabajadores coinciden en una cabina.</small></span><button class="pill" onclick="alarma()">Probar</button></div></div>
-  <div class="actions"><button class="ghost" onclick="sb.auth.signOut()">Cerrar sesión</button></div>
+  <div class="actions"><button class="ghost" onclick="cerrarSesion()">Cerrar sesión</button></div>
   <p class="note">Para instalarla como app: en Android, menú del navegador → «Instalar aplicación». En iPhone, Safari → Compartir → «Añadir a pantalla de inicio».</p>`;
 }
 function editarCentro() {
