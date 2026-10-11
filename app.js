@@ -1077,7 +1077,7 @@ async function abrirCita(id, idiomaMsg) {
       <dt>Cuándo</dt><dd>${ini.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })} · ${hhmm(ini)}–${hhmm(fin)}</dd>
       <dt>Con</dt><dd>${esc(trab(c.trabajador_id).nombre)}</dd>
       <dt>Cabina</dt><dd>${esc(cab(c.cabina_id).nombre)}</dd>
-      <dt>Teléfono</dt><dd>${esc(verTel(cl.telefono, cl.pais_telefono) || '—')}</dd>${cl.fecha_nacimiento ? `<dt>Edad</dt><dd>${edad(cl.fecha_nacimiento)} años</dd>` : ''}${cl.salud ? `<dt>Salud</dt><dd class="warn"><b>${esc(cl.salud)}</b></dd>` : ''}
+      <dt>Teléfono</dt><dd>${esc(verTel(cl.telefono, cl.pais_telefono) || '—')}</dd>${cl.fecha_nacimiento ? `<dt>Edad</dt><dd>${edad(cl.fecha_nacimiento)} años</dd>` : ''}${cl.salud ? `<dt>Anotaciones</dt><dd class="warn"><b>${esc(cl.salud)}</b></dd>` : ''}
       ${S.puedeFacturar || c.precio != null ? `<dt>Precio</dt><dd>${eur(precioCita(c))}</dd>` : ''}
       ${c.notas ? `<dt>Notas</dt><dd>${esc(c.notas)}</dd>` : ''}
       ${esRecepcion() ? `<dt>Historial</dt><dd>${lineaHistorial(c.cliente_id)}</dd>` : ''}
