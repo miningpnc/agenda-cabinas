@@ -2,7 +2,10 @@
 'use strict';
 
 /* ================= utilidades ================= */
+const HASH0 = location.hash; // se lee antes de que Supabase limpie la dirección
 const CFG = window.APP_CONFIG || {};
+const DEMO = !!(CFG.demo && CFG.demo.activa); // pantalla de bienvenida con botones de prueba
+const REGISTRO = CFG.permitirRegistro === true; // false: solo entran los usuarios creados por el centro
 const CONFIGURADO = !!(CFG.supabaseUrl && CFG.supabaseKey && !/TU-PROYECTO/.test(CFG.supabaseUrl) && !/TU-CLAVE/.test(CFG.supabaseKey));
 const sb = CONFIGURADO && window.supabase ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey) : null;
 
@@ -93,13 +96,26 @@ function preguntar(titulo, texto, si = 'Sí', no = 'No', rojo = false) {
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { if ($('#dialog').innerHTML) return; closeSheet(); } });
 
 /* ================= arranque y acceso ================= */
+const VOLVER_A = location.origin + location.pathname; // los enlaces de los correos vuelven aquí
+let enRecuperacion = HASH0.includes('type=recovery');
+
 async function boot() {
   if (!CONFIGURADO) return pantallaConfig();
   if (!sb) return pantallaError('No se pudo cargar la conexión. Revisa tu internet y recarga.');
+  sb.auth.onAuthStateChange(ev => {
+    if (ev === 'SIGNED_OUT') location.reload();
+    if (ev === 'PASSWORD_RECOVERY') { enRecuperacion = true; pantallaNuevaPass(); }
+  });
   const { data } = await sb.auth.getSession();
-  sb.auth.onAuthStateChange(ev => { if (ev === 'SIGNED_OUT') location.reload(); });
-  if (!data.session) return pantallaLogin();
+  const q = new URLSearchParams(HASH0.replace(/^#/, ''));
+  if (q.get('error_description')) {
+    history.replaceState(null, '', VOLVER_A);
+    return pantallaLogin('entrar', /expired|invalid/i.test(q.get('error_description')) ? 'El enlace del correo ha caducado o ya se usó. Entra con tu contraseña o pide otro.' : q.get('error_description'));
+  }
+  if (enRecuperacion && data.session) return pantallaNuevaPass();
+  if (!data.session) return DEMO ? pantallaDemo() : pantallaLogin();
   S.user = data.session.user;
+  if (HASH0.includes('type=signup')) toast('Correo confirmado. ¡Bienvenido!');
   iniciarApp();
 }
 
@@ -109,36 +125,148 @@ function pantallaConfig() {
 }
 function pantallaError(t) { $('#app').innerHTML = `<div class="center"><div class="card"><h2>Algo ha fallado</h2><p class="muted">${esc(t)}</p><div class="actions"><button class="primary" onclick="location.reload()">Recargar</button></div></div></div>`; }
 
-function pantallaLogin(modo = 'entrar', aviso = '') {
-  const nuevo = modo === 'nuevo';
+function pantallaDemo(aviso = '') {
+  $('#app').innerHTML = `<div class="center"><div class="card welcome">
+    <div class="logo" style="margin-bottom:12px">${LOGO}</div>
+    <span class="demo-tag">Versión de demostración</span>
+    <h2 style="margin-top:8px">Agenda Cabinas</h2>
+    <p class="muted" style="margin:4px 0 0">Agenda de citas para centros con varias actividades, cabinas y profesionales. Elige cómo quieres entrar:</p>
+    <div class="roles">
+      <button class="role" id="d-recepcion" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4M8 14h8M8 17h5"/></svg>
+        <span><b>Entrar como Recepción</b><small>Administrador: agenda de todo el equipo, clientes, facturación del centro y ajustes.</small></span>
+      </button>
+      <button class="role" id="d-trabajador" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5"/></svg>
+        <span><b>Entrar como Trabajador</b><small>Profesional: solo sus citas, sus avisos y, si es autónomo, su propia facturación.</small></span>
+      </button>
+    </div>
+    <div class="err" id="d-err" ${aviso ? '' : 'hidden'}>${esc(aviso)}</div>
+    <div class="secure">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>
+      <div><b>Así se protegen los datos en la versión para tu centro</b>
+      <ul>
+        <li>Cada persona entra con <b>su email y su contraseña</b>. Sin ellos no se ve ningún dato, ni siquiera desde esta web.</li>
+        <li>El alta se <b>valida por correo electrónico</b>: nadie accede hasta confirmar su email, y solo si el centro le ha dado de alta.</li>
+        <li>Los datos se guardan <b>cifrados en servidores de la Unión Europea</b>.</li>
+        <li>Cada uno ve <b>solo lo que le corresponde</b>: recepción, todo; cada profesional, sus citas.</li>
+        <li>No se guarda historia clínica: eso sigue en el programa de pacientes del centro.</li>
+      </ul>
+      <p>Esta demo funciona sobre la misma base de datos y los mismos permisos reales. Los botones solo rellenan por ti el email y la contraseña de dos cuentas de prueba con datos inventados.</p></div>
+    </div>
+    <p style="text-align:center;margin:14px 0 0"><button type="button" class="pill" id="d-manual">Entrar con mi email y contraseña</button></p>
+  </div></div>`;
+  const entrar = async (rol, btn) => {
+    const c = (CFG.demo || {})[rol] || {}, err = $('#d-err');
+    err.hidden = true;
+    if (!c.email || !c.password) { err.hidden = false; err.textContent = 'Falta configurar la cuenta de prueba en config.js.'; return; }
+    document.querySelectorAll('.role').forEach(b => b.disabled = true);
+    const t = btn.querySelector('b'), txt = t.textContent; t.textContent = 'Entrando…';
+    const r = await sb.auth.signInWithPassword({ email: c.email, password: c.password });
+    document.querySelectorAll('.role').forEach(b => b.disabled = false); t.textContent = txt;
+    if (r.error) {
+      err.hidden = false;
+      err.textContent = /Invalid login/i.test(r.error.message) ? 'La cuenta de prueba no existe o su contraseña no coincide con config.js. Revisa los usuarios en Supabase.' : traducirAuth(r.error.message);
+      return;
+    }
+    S.user = r.data.session.user; iniciarApp();
+  };
+  $('#d-recepcion').onclick = e => entrar('recepcion', e.currentTarget);
+  $('#d-trabajador').onclick = e => entrar('trabajador', e.currentTarget);
+  $('#d-manual').onclick = () => pantallaLogin('entrar');
+}
+
+function pantallaLogin(modo = 'entrar', aviso = '', email = '', ok = false) {
+  const nuevo = modo === 'nuevo', olvido = modo === 'olvido';
+  const intro = nuevo ? 'Primera vez: crea tu contraseña con el email que te ha dado de alta recepción. Te llegará un correo para confirmarlo.'
+    : olvido ? 'Escribe tu email y te enviaremos un enlace para crear una contraseña nueva.' : 'Entra con tu email y contraseña.';
   $('#app').innerHTML = `<div class="center"><form class="card" id="login" novalidate>
     <div class="logo" style="margin-bottom:12px">${LOGO}</div>
     <h2>Agenda Cabinas</h2>
-    <p class="muted" style="margin:4px 0 0">${nuevo ? 'Primera vez: crea tu contraseña con el email que te ha dado de alta recepción.' : 'Entra con tu email y contraseña.'}</p>
-    <div class="field"><label for="l-email">Email</label><input id="l-email" type="email" autocomplete="email" required></div>
-    <div class="field"><label for="l-pass">Contraseña</label><input id="l-pass" type="password" autocomplete="${nuevo ? 'new-password' : 'current-password'}" minlength="6" required></div>
+    <p class="muted" style="margin:4px 0 0">${intro}</p>
+    <div class="field"><label for="l-email">Email</label><input id="l-email" type="email" autocomplete="email" required value="${esc(email)}"></div>
+    ${olvido ? '' : `<div class="field"><label for="l-pass">Contraseña</label><input id="l-pass" type="password" autocomplete="${nuevo ? 'new-password' : 'current-password'}" minlength="6" required></div>`}
     ${nuevo ? '<div class="field"><label for="l-pass2">Repite la contraseña</label><input id="l-pass2" type="password" autocomplete="new-password" minlength="6" required></div>' : ''}
-    <div class="err" id="l-err">${esc(aviso)}</div>
-    <div class="actions"><button class="primary" type="submit">${nuevo ? 'Crear mi acceso' : 'Entrar'}</button></div>
-    <p style="text-align:center;margin:14px 0 0"><button type="button" class="pill" id="l-swap">${nuevo ? 'Ya tengo contraseña' : 'Es mi primera vez'}</button></p>
+    <div class="${ok ? 'box info' : 'err'}" id="l-err" ${aviso ? '' : 'style="margin:0"'}>${esc(aviso)}</div>
+    <div class="actions"><button class="primary" type="submit">${nuevo ? 'Crear mi acceso' : olvido ? 'Enviar enlace' : 'Entrar'}</button></div>
+    <div class="actions" id="l-extra" hidden><button type="button" class="ghost" id="l-resend">Reenviar correo de confirmación</button></div>
+    ${DEMO ? '<p style="text-align:center;margin:14px 0 0"><button type="button" class="pill" onclick="pantallaDemo()">‹ Volver a la demostración</button></p>' : ''}
+    ${REGISTRO ? `<p style="text-align:center;margin:14px 0 0;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+      ${modo !== 'entrar' ? '<button type="button" class="pill" data-m="entrar">Ya tengo contraseña</button>' : ''}
+      ${modo !== 'nuevo' ? '<button type="button" class="pill" data-m="nuevo">Es mi primera vez</button>' : ''}
+      ${modo === 'entrar' ? '<button type="button" class="pill" data-m="olvido">He olvidado mi contraseña</button>' : ''}
+    </p>` : ''}
+    <div class="secure">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>
+      <div><b>Tus datos están protegidos</b>
+      <p>Solo se puede entrar con un email y una contraseña dados de alta por el centro. Sin ellos no se ve ningún dato, ni siquiera desde esta web.</p>
+      <p>La información se guarda cifrada en servidores de la Unión Europea y cada persona ve únicamente lo que le corresponde: recepción, la agenda completa; cada profesional, solo sus citas.</p>
+      <p>Esta agenda no guarda historia clínica. Protege tu contraseña y no la compartas.</p></div>
+    </div>
   </form></div>`;
-  $('#l-swap').onclick = () => pantallaLogin(nuevo ? 'entrar' : 'nuevo');
+  document.querySelectorAll('#login [data-m]').forEach(b => b.onclick = () => pantallaLogin(b.dataset.m, '', $('#l-email').value.trim()));
+  const mostrarReenvio = () => {
+    $('#l-extra').hidden = false;
+    $('#l-resend').onclick = async () => {
+      const em = $('#l-email').value.trim().toLowerCase();
+      const r = await sb.auth.resend({ type: 'signup', email: em, options: { emailRedirectTo: VOLVER_A } });
+      const box = $('#l-err'); box.style.margin = ''; box.className = r.error ? 'err' : 'box info';
+      box.textContent = r.error ? traducirAuth(r.error.message) : 'Correo reenviado. Revisa también la carpeta de spam.';
+    };
+  };
   $('#login').onsubmit = async e => {
     e.preventDefault();
-    const email = $('#l-email').value.trim().toLowerCase(), pass = $('#l-pass').value, err = $('#l-err');
-    err.textContent = '';
-    if (!email || pass.length < 6) { err.textContent = 'Escribe tu email y una contraseña de al menos 6 caracteres.'; return; }
+    const em = $('#l-email').value.trim().toLowerCase(), err = $('#l-err');
+    const pass = olvido ? '' : $('#l-pass').value;
+    err.className = 'err'; err.style.margin = ''; err.textContent = '';
+    if (!em) { err.textContent = 'Escribe tu email.'; return; }
+    if (!olvido && pass.length < 6) { err.textContent = 'La contraseña debe tener al menos 6 caracteres.'; return; }
     if (nuevo && pass !== $('#l-pass2').value) { err.textContent = 'Las contraseñas no coinciden.'; return; }
-    const btn = e.submitter || $('#login button[type=submit]'); btn.disabled = true; btn.textContent = 'Un momento…';
-    const r = nuevo ? await sb.auth.signUp({ email, password: pass }) : await sb.auth.signInWithPassword({ email, password: pass });
+    const btn = e.submitter || $('#login button[type=submit]'), txt = btn.textContent; btn.disabled = true; btn.textContent = 'Un momento…';
+    let r;
+    if (olvido) r = await sb.auth.resetPasswordForEmail(em, { redirectTo: VOLVER_A });
+    else if (nuevo) r = await sb.auth.signUp({ email: em, password: pass, options: { emailRedirectTo: VOLVER_A } });
+    else r = await sb.auth.signInWithPassword({ email: em, password: pass });
+    btn.disabled = false; btn.textContent = txt;
     if (r.error) {
-      btn.disabled = false; btn.textContent = nuevo ? 'Crear mi acceso' : 'Entrar';
-      const m = r.error.message || '';
-      err.textContent = /Invalid login/i.test(m) ? 'Email o contraseña incorrectos.' : /already registered/i.test(m) ? 'Este email ya tiene acceso. Pulsa «Ya tengo contraseña».' : m;
+      err.textContent = traducirAuth(r.error.message);
+      if (/not confirmed/i.test(r.error.message)) mostrarReenvio();
       return;
     }
-    if (!r.data.session) { pantallaLogin('entrar', 'Te hemos enviado un correo para confirmar el acceso. Ábrelo y vuelve a entrar.'); return; }
+    if (olvido) return pantallaLogin('entrar', 'Si ese email tiene acceso, te hemos enviado un enlace para crear una contraseña nueva.', em, true);
+    if (nuevo && r.data.user && Array.isArray(r.data.user.identities) && r.data.user.identities.length === 0)
+      return pantallaLogin('entrar', 'Este email ya tiene acceso. Entra con tu contraseña o usa «He olvidado mi contraseña».', em);
+    if (!r.data.session) { pantallaLogin('entrar', `Te hemos enviado un correo a ${em}. Pulsa el enlace para confirmar y entrarás directamente. Revisa también spam.`, em, true); mostrarReenvio(); return; }
     S.user = r.data.session.user; iniciarApp();
+  };
+}
+function traducirAuth(m) {
+  m = m || '';
+  if (/Invalid login/i.test(m)) return 'Email o contraseña incorrectos.';
+  if (/not confirmed/i.test(m)) return 'Aún no has confirmado tu correo. Pulsa el enlace que te enviamos o pide que te lo reenviemos.';
+  if (/signups? not allowed|signup.*disabled/i.test(m)) return 'El registro está cerrado. Pide a recepción que te dé de alta.';
+  if (/already registered/i.test(m)) return 'Este email ya tiene acceso. Pulsa «Ya tengo contraseña».';
+  if (/rate limit|security purposes|seconds/i.test(m)) return 'Has hecho varios intentos seguidos. Espera un minuto y vuelve a probar.';
+  if (/sending|smtp|email.*(send|deliver)/i.test(m)) return 'No se ha podido enviar el correo. Revisa la configuración de correo en Supabase.';
+  if (/password/i.test(m) && /weak|short|least/i.test(m)) return 'La contraseña es demasiado débil. Usa al menos 6 caracteres.';
+  return m;
+}
+function pantallaNuevaPass() {
+  history.replaceState(null, '', VOLVER_A);
+  $('#app').innerHTML = `<div class="center"><form class="card" id="np" novalidate>
+    <h2>Crea tu contraseña nueva</h2>
+    <div class="field"><label for="np-1">Contraseña nueva</label><input id="np-1" type="password" autocomplete="new-password" minlength="6"></div>
+    <div class="field"><label for="np-2">Repítela</label><input id="np-2" type="password" autocomplete="new-password" minlength="6"></div>
+    <div class="err" id="np-err"></div>
+    <div class="actions"><button class="primary" type="submit">Guardar y entrar</button></div></form></div>`;
+  $('#np').onsubmit = async e => {
+    e.preventDefault();
+    const a = $('#np-1').value, b = $('#np-2').value, err = $('#np-err');
+    if (a.length < 6) { err.textContent = 'Al menos 6 caracteres.'; return; }
+    if (a !== b) { err.textContent = 'Las contraseñas no coinciden.'; return; }
+    const r = await sb.auth.updateUser({ password: a });
+    if (r.error) { err.textContent = traducirAuth(r.error.message); return; }
+    enRecuperacion = false; S.user = r.data.user; toast('Contraseña cambiada'); iniciarApp();
   };
 }
 
@@ -258,7 +386,7 @@ function pestañas() {
 function render() {
   $('#app').innerHTML = `<div class="wrap">
     <header class="top"><div class="logo">${LOGO}</div>
-      <div class="t"><h1>${esc(S.ajustes.nombre_centro || 'Mi centro')}</h1><small>${esRecepcion() ? 'Recepción' : esc(yo()?.nombre || '')}</small></div>
+      <div class="t"><h1>${esc(S.ajustes.nombre_centro || 'Mi centro')}</h1><small>${esRecepcion() ? 'Recepción' : esc(yo()?.nombre || '')}${DEMO ? ' · <span class="demo-tag">Demo</span>' : ''}</small></div>
       <button class="bell" id="bell" aria-label="Avisos" onclick="abrirAvisos()">${BELL}<b id="bell-n" hidden></b></button>
     </header>
     <main id="view"></main></div>
@@ -769,7 +897,7 @@ function editarTrabajador(id) {
     <div class="field"><span class="flabel">Cabinas habituales · ● principal</span><div class="checks">${S.cabinas.filter(c => c.activa).map(c => `<label><input type="checkbox" name="t-cab" value="${c.id}" ${cabs.some(x => x.cabina_id === c.id) ? 'checked' : ''}>${esc(c.nombre)}<input type="radio" name="t-pri" value="${c.id}" ${principal === c.id ? 'checked' : ''} aria-label="Principal" style="margin-left:auto"></label>`).join('') || '<span class="muted">Primero crea cabinas.</span>'}</div></div>
     <label class="switch"><span><b>Ve su facturación</b><br><small class="muted">Para autónomos: verá lo facturado en sus propias citas, nunca el total del centro.</small></span><input type="checkbox" id="t-fact" ${t.ver_facturacion ? 'checked' : ''}></label>
     <label class="switch"><span><b>En activo</b><br><small class="muted">Si lo desactivas deja de salir en la agenda; su historial se conserva.</small></span><input type="checkbox" id="t-act-on" ${t.activo ? 'checked' : ''}></label>
-    <div class="box info">Para entrar, el trabajador abre la app, pulsa «Es mi primera vez» y crea su contraseña con <b>este mismo email</b>.</div>
+    <div class="box info">${REGISTRO ? 'Para entrar, el trabajador abre la app, pulsa «Es mi primera vez» y crea su contraseña con <b>este mismo email</b>.' : 'Para que pueda entrar, crea su usuario en Supabase (Authentication → Users → Add user) con <b>este mismo email</b> y una contraseña, y pásasela en persona.'}</div>
     <div class="err" id="t-err"></div>
     <div class="actions"><button class="ghost" onclick="closeSheet()">Cancelar</button><button class="primary" onclick="guardarTrabajador(${id ? `'${id}'` : 'null'})">Guardar</button></div>`);
 }

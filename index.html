@@ -175,6 +175,23 @@ tfoot td{font-weight:700}
 .center{min-height:100%;display:grid;place-items:center;padding-inline:16px;padding-block:40px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:22px 18px;width:100%;max-width:400px}
 .card h2{font-size:22px}
+.welcome{max-width:460px}
+.demo-tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;border-radius:6px;padding:2px 7px;background:color-mix(in srgb,var(--warn) 16%,var(--surface));color:var(--warn)}
+.roles{display:grid;gap:10px;margin-top:16px}
+.role{display:flex;gap:12px;align-items:flex-start;text-align:left;width:100%;padding:14px;border-radius:14px;border:1px solid var(--line);background:var(--sunken)}
+.role:first-child{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.role:first-child small{color:var(--on-accent);opacity:.85}
+.role svg{width:28px;height:28px;flex:none;margin-top:2px}
+.role b{display:block;font-family:var(--f-display);font-size:16px}
+.role small{display:block;color:var(--muted);font-size:13px;margin-top:2px}
+.role:disabled{opacity:.6;cursor:wait}
+.secure ul{margin:6px 0 0;padding-left:18px;color:var(--muted)}
+.secure li{margin-top:4px}
+.secure li b{display:inline;font-size:inherit;margin:0;color:var(--ink)}
+.secure{display:flex;gap:12px;margin-top:18px;padding:14px;border-radius:12px;background:color-mix(in srgb,var(--ok) 10%,var(--surface));border:1px solid color-mix(in srgb,var(--ok) 30%,var(--line));font-size:13px;line-height:1.45}
+.secure svg{width:26px;height:26px;flex:none;color:var(--ok)}
+.secure b{display:block;font-size:14px;margin-bottom:2px}
+.secure p{margin:6px 0 0;color:var(--muted)}
 .spinner{width:26px;height:26px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin:40px auto}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:no-preference){.sheet{animation:up .18s ease-out}@keyframes up{from{transform:translateY(24px);opacity:.6}}}
