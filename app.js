@@ -118,9 +118,22 @@ async function avisoPrueba(correo) {
   const d = r.data || {};
   toast(`Enviado: ${d.push || 0} aviso${d.push === 1 ? '' : 's'} al móvil${correo ? ` y ${d.correos || 0} correo${d.correos === 1 ? '' : 's'}` : ''}. Puede tardar unos segundos.`);
 }
-async function cerrarSesion() {
-  try { if (pushPosible()) { const reg = await navigator.serviceWorker.getRegistration(); const sub = reg && await reg.pushManager.getSubscription(); if (sub) await sb.rpc('borrar_suscripcion', { p_endpoint: sub.endpoint }); } } catch (e) { }
-  sb.auth.signOut();
+async function cerrarSesion(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Cerrando sesión…'; }
+  const conLimite = (p, ms) => Promise.race([p, new Promise(r => setTimeout(r, ms))]);
+  // 1) este dispositivo deja de recibir avisos de este usuario (como mucho 2 s)
+  try {
+    if (pushPosible()) await conLimite((async () => {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = reg && await reg.pushManager.getSubscription();
+      if (sub) await sb.rpc('borrar_suscripcion', { p_endpoint: sub.endpoint });
+    })(), 2000);
+  } catch (e) { }
+  // 2) cerrar la sesión en este navegador (sin depender de la conexión)
+  try { await conLimite(sb.auth.signOut({ scope: 'local' }), 2000); } catch (e) { }
+  // 3) por si acaso, borrar cualquier resto de la sesión guardada
+  try { Object.keys(localStorage).filter(k => /^sb-.*-auth-token/.test(k)).forEach(k => localStorage.removeItem(k)); } catch (e) { }
+  location.reload();
 }
 try { if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => { }); } catch (e) { }
 
@@ -317,7 +330,7 @@ function pantallaSinPerfil() {
   $('#app').innerHTML = `<div class="center"><div class="card"><h2>Tu usuario aún no está dado de alta</h2>
   <p class="muted">Has entrado como <b>${esc(S.user.email)}</b>, pero recepción todavía no te ha añadido al equipo con este email.</p>
   <p class="muted">Pide que te den de alta con exactamente este email y vuelve a comprobarlo.</p>
-  <div class="actions"><button class="ghost" onclick="cerrarSesion()">Salir</button><button class="primary" onclick="iniciarApp()">Volver a comprobar</button></div></div></div>`;
+  <div class="actions"><button class="ghost" onclick="cerrarSesion(this)">Salir</button><button class="primary" onclick="iniciarApp()">Volver a comprobar</button></div></div></div>`;
 }
 
 async function iniciarApp() {
@@ -1507,7 +1520,7 @@ function vistaCuenta() {
   <div class="row"><span class="main"><b>Avisos en este dispositivo</b><small>${permiso === 'granted' ? (S.pushActivo ? 'Activados: te llegarán aunque la app esté cerrada o el móvil bloqueado.' : 'Activados con la app abierta. Pulsa «Activar» para recibirlos también con la app cerrada.') : permiso === 'denied' ? 'Bloqueados en los ajustes del navegador o del móvil.' : esIOS() && !instalada() ? 'En iPhone, primero añade la app a la pantalla de inicio.' : 'Desactivados.'}</small></span>${permiso !== 'denied' && !S.pushActivo ? '<button class="pill" onclick="activarNotificaciones()">Activar</button>' : ''}</div>
   ${S.pushActivo ? '<div class="row"><span class="main"><b>Probar avisos</b><small>Te envía un aviso de prueba a ti.</small></span><span style="display:grid;gap:6px"><button class="pill" onclick="avisoPrueba(false)">Al móvil</button><button class="pill" onclick="avisoPrueba(true)">Móvil y correo</button></span></div>' : ''}
   <div class="row"><span class="main"><b>Probar sonido de alarma</b><small>El que suena cuando dos trabajadores coinciden en una cabina.</small></span><button class="pill" onclick="alarma()">Probar</button></div></div>
-  <div class="actions"><button class="ghost" onclick="cerrarSesion()">Cerrar sesión</button></div>
+  <div class="actions"><button class="ghost" onclick="cerrarSesion(this)">Cerrar sesión</button></div>
   <p class="note">Para instalarla como app: en Android, menú del navegador → «Instalar aplicación». En iPhone, Safari → Compartir → «Añadir a pantalla de inicio».</p>`;
 }
 function editarCentro() {
