@@ -7,7 +7,7 @@
 
 -- ---------- Limpieza (también de versiones anteriores) ----------
 drop trigger if exists al_crear_usuario on auth.users;
-drop table if exists bloqueos, dias_especiales, horario_semanal, avisos, suscripciones_push, perfiles, cobros, citas, precios,
+drop table if exists consentimientos, bloqueos, dias_especiales, horario_semanal, avisos, suscripciones_push, perfiles, cobros, citas, precios,
   servicios, trabajador_cabinas, trabajador_actividades, trabajador_salas,
   cabinas, salas, actividades, trabajadores, profesionales, clientes, ajustes cascade;
 drop function if exists mi_rol(), mi_trabajador(), mi_profesional(), puedo_ver_precios(),
@@ -16,7 +16,7 @@ drop function if exists mi_rol(), mi_trabajador(), mi_profesional(), puedo_ver_p
   historial_clientes(), citas_con_choque(timestamptz, timestamptz),
   horario_del_dia(date), comprobar_horario(), comprobar_bloqueo(), comprobar_servicio(),
   marcar_cliente_pendiente(), fusionar_clientes(uuid, uuid),
-  guardar_suscripcion(jsonb, text), borrar_suscripcion(text) cascade;
+  guardar_suscripcion(jsonb, text), borrar_suscripcion(text), aplicar_consentimiento() cascade;
 
 create extension if not exists btree_gist;
 
@@ -1147,3 +1147,65 @@ select count(*) as clientes,
        count(*) filter (where fecha_nacimiento is not null) as con_fecha_nacimiento,
        count(*) filter (where pais_telefono <> 'ES') as telefonos_extranjeros
 from clientes;
+
+-- =====================================================================
+-- CONSENTIMIENTO DE PROTECCIÓN DE DATOS
+-- =====================================================================
+-- Datos del centro que aparecen como «responsable» en la hoja
+alter table ajustes add column if not exists razon_social text;
+alter table ajustes add column if not exists cif text;
+alter table ajustes add column if not exists email_contacto text;
+alter table ajustes add column if not exists poblacion text;
+
+alter table clientes add column if not exists consentimiento_comunicaciones boolean not null default false;
+
+-- Cada hoja firmada (o retirada) queda guardada tal cual se firmó
+create table if not exists consentimientos (
+  id uuid primary key default gen_random_uuid(),
+  cliente_id uuid not null references clientes on delete cascade,
+  tipo text not null default 'firma' check (tipo in ('firma','papel','retirada')),
+  acepta_salud boolean not null default false,
+  acepta_comunicaciones boolean not null default false,
+  texto text not null,     -- la hoja completa, tal como se firmó
+  datos jsonb,             -- datos del cliente en ese momento
+  firma text,              -- imagen de la firma (PNG) si se firmó en pantalla
+  firmado_en timestamptz not null default now(),
+  registrado_por uuid default auth.uid());
+create index if not exists consentimientos_cliente on consentimientos (cliente_id, firmado_en desc);
+
+alter table consentimientos enable row level security;
+drop policy if exists ver on consentimientos;
+drop policy if exists crear on consentimientos;
+create policy ver on consentimientos for select to authenticated using (
+  mi_rol() = 'recepcion'
+  or exists (select 1 from clientes c where c.id = cliente_id and c.creado_por = auth.uid()));
+create policy crear on consentimientos for insert to authenticated with check (
+  mi_rol() = 'recepcion'
+  or exists (select 1 from clientes c where c.id = cliente_id and c.creado_por = auth.uid()));
+-- No se pueden modificar ni borrar: es el justificante
+
+-- Al guardar una hoja, la ficha del cliente se actualiza sola
+create or replace function aplicar_consentimiento() returns trigger language plpgsql
+security definer set search_path = public as $$
+begin
+  update clientes set
+    consentimiento_salud = new.acepta_salud,
+    consentimiento_salud_en = case when new.acepta_salud then new.firmado_en else null end,
+    salud = case when new.acepta_salud then salud else null end,   -- si lo retira, se borran las anotaciones
+    consentimiento_comunicaciones = new.acepta_comunicaciones
+  where id = new.cliente_id;
+  return new;
+end $$;
+drop trigger if exists al_guardar_consentimiento on consentimientos;
+create trigger al_guardar_consentimiento after insert on consentimientos
+  for each row execute function aplicar_consentimiento();
+
+-- Datos de ejemplo del centro (cámbialos en Ajustes → Centro)
+update ajustes set
+  razon_social = coalesce(razon_social, 'Centro de demostración S.L.'),
+  cif = coalesce(cif, 'B00000000'),
+  email_contacto = coalesce(email_contacto, 'miningpnc@gmail.com'),
+  poblacion = coalesce(poblacion, 'Albir')
+where id = 1;
+
+select 'listo' as estado;
