@@ -1047,3 +1047,10 @@ end $$;
 select (select count(*) from clientes where validado) as clientes_dados_de_alta,
        (select count(*) from clientes where not validado) as pendientes_de_alta,
        (select count(*) from citas where llego_tarde) as citas_con_retraso;
+
+-- =====================================================================
+-- FECHA DE NACIMIENTO DE LOS TRABAJADORES
+-- =====================================================================
+alter table trabajadores add column if not exists fecha_nacimiento date;
+
+select nombre, fecha_nacimiento from trabajadores order by nombre;

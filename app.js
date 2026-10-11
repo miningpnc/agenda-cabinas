@@ -422,16 +422,111 @@ const FRASES = [
   ['La flor no compite con la flor de al lado: simplemente florece.', 'Sabiduría zen'],
   ['Postura firme, respiración suave, mente tranquila.', 'Enseñanza del yoga'],
   ['La amabilidad es el idioma que todos entienden.', 'Frase del día'],
-  ['Tu energía de hoy es el cuidado que darás a otros.', 'Frase del día']
+  ['Tu energía de hoy es el cuidado que darás a otros.', 'Frase del día'],
+  ['Más vale encender una vela que maldecir la oscuridad.', 'Proverbio chino'],
+  ['No temas avanzar despacio; teme solo quedarte quieto.', 'Proverbio chino'],
+  ['El que pregunta es ignorante un minuto; el que no pregunta lo es toda la vida.', 'Proverbio chino'],
+  ['Aprender sin reflexionar es malgastar la energía.', 'Confucio'],
+  ['Cuando camines, camina. Cuando comas, come.', 'Proverbio zen'],
+  ['Siéntate, respira, sonríe.', 'Práctica zen'],
+  ['Quien busca un amigo sin defectos se queda sin amigos.', 'Proverbio turco'],
+  ['Mente sana en cuerpo sano.', 'Juvenal'],
+  ['Poco a poco se va lejos.', 'Refrán'],
+  ['A mal tiempo, buena cara.', 'Refrán'],
+  ['No hay mal que cien años dure.', 'Refrán'],
+  ['Lo que se hace con cariño no cansa igual.', 'Frase del día'],
+  ['Respira: es solo un mal rato, no un mal día.', 'Frase del día'],
+  ['La sonrisa es el camino más corto entre dos personas.', 'Frase popular'],
+  ['Namasté: lo mejor de mí saluda a lo mejor de ti.', 'Saludo del yoga'],
+  ['El silencio también cuida.', 'Frase del día'],
+  ['Las hojas que caen nos enseñan a soltar.', 'Sabiduría zen'],
+  ['Si no puedes cambiar el viento, ajusta las velas.', 'Proverbio marinero'],
+  ['El río no lucha contra la piedra: la rodea y sigue su camino.', 'Sabiduría oriental'],
+  ['Un buen masaje empieza mucho antes de tocar: empieza escuchando.', 'Frase del día'],
+  ['La belleza que más se nota es la del trato.', 'Frase del día'],
+  ['Unas manos tranquilas transmiten tranquilidad.', 'Frase del día'],
+  ['Hoy cuenta. Cada cita cuenta.', 'Frase del día'],
+  ['El detalle marca la diferencia entre un buen servicio y uno inolvidable.', 'Frase del día'],
+  ['Cuídate para poder cuidar.', 'Frase del día'],
+  ['Una pausa a tiempo vale más que diez carreras.', 'Frase del día'],
+  ['La constancia vence lo que la dicha no alcanza.', 'Refrán'],
+  ['Nadie tropieza dos veces con la misma piedra si mira dónde pisa.', 'Refrán adaptado'],
+  ['El hábito hace al maestro.', 'Refrán'],
+  ['Con paciencia y saliva, el elefante se comió a la hormiga.', 'Refrán'],
+  ['En calma, las manos saben lo que hacen.', 'Frase del día'],
+  ['El estrés no trabaja mejor que tú: déjalo en la puerta.', 'Frase del día'],
+  ['La primera impresión es la bienvenida; la última, el recuerdo.', 'Frase del día'],
+  ['El tiempo que dedicas a escuchar nunca es tiempo perdido.', 'Frase del día'],
+  ['La montaña no se sube de un salto, sino paso a paso.', 'Proverbio tibetano'],
+  ['Al final del camino, lo que queda es cómo hiciste sentir a los demás.', 'Frase del día'],
+  ['Lo pequeño, bien hecho, se vuelve grande.', 'Frase del día'],
+  ['Un día tranquilo también es un buen día.', 'Frase del día'],
+  ['Tu postura habla antes que tú: espalda recta, hombros sueltos.', 'Enseñanza del yoga'],
+  ['Agradece el día, incluso los ratos difíciles: también enseñan.', 'Frase del día'],
+  ['La luna no tiene prisa y aun así recorre todo el cielo.', 'Proverbio oriental'],
+  ['Si cuidas las raíces, las flores llegan solas.', 'Sabiduría popular'],
+  ['La mejor recomendación es un cliente que vuelve.', 'Frase del día'],
+  ['El orden de la cabina es el orden de la mente.', 'Frase del día'],
+  ['Mira a cada cliente como si fuera la persona más importante del día.', 'Frase del día'],
+  ['Hay días de siembra y días de cosecha: los dos son necesarios.', 'Sabiduría popular'],
+  ['Las cosas buenas llevan tiempo; las mejores, cuidado.', 'Frase del día'],
+  ['Exhala lo que no puedes controlar.', 'Respiración consciente'],
+  ['El equilibrio no se encuentra: se practica.', 'Enseñanza del yoga'],
+  ['Una mente serena convierte la prisa en ritmo.', 'Sabiduría zen'],
+  ['Tú también eres parte del bienestar que se respira aquí.', 'Frase del día'],
+  ['Empieza donde estás, usa lo que tienes, haz lo que puedas.', 'Frase popular'],
+  ['La generosidad es la riqueza que más se multiplica.', 'Proverbio popular'],
+  ['El mejor maquillaje es una buena noche de descanso.', 'Frase del día'],
+  ['Mueve el cuerpo, aquieta la mente.', 'Enseñanza del yoga'],
+  ['Hoy alguien saldrá de aquí sintiéndose mejor gracias a ti.', 'Frase del día'],
+  ['La amabilidad nunca pasa de moda.', 'Frase del día'],
+  ['Para florecer hace falta luz, agua y paciencia.', 'Sabiduría popular'],
+  ['Las manos expertas se hicieron con miles de repeticiones.', 'Frase del día'],
+  ['Disfruta del camino: la meta es solo una parte.', 'Proverbio oriental'],
+  ['Si hoy cuesta, recuerda por qué empezaste.', 'Frase del día']
+];
+const FRASES_FESTIVO = [
+  ['Trabajar hoy, festivo, te dará un día libre cuando más te convenga.', 'Hoy es festivo'],
+  ['Hoy trabajas tú para que mañana libres tú.', 'Hoy es festivo'],
+  ['Un festivo trabajado es un día normal ganado para tu descanso.', 'Hoy es festivo'],
+  ['El trabajo de hoy es la calidad de vida de mañana.', 'Hoy es festivo'],
+  ['Mientras otros descansan, tú siembras tu próximo día libre.', 'Hoy es festivo'],
+  ['Hoy es festivo y estás aquí: gracias. Ese esfuerzo también vuelve.', 'Hoy es festivo'],
+  ['Hoy por ti, mañana libre para ti.', 'Hoy es festivo'],
+  ['Los clientes de hoy también tienen fiesta: hagamos que la disfruten.', 'Hoy es festivo'],
+  ['Trabaja hoy con calma y disfruta mañana con ganas.', 'Hoy es festivo'],
+  ['Un día distinto merece un ánimo distinto: hoy toca brillar.', 'Hoy es festivo']
 ];
 function saludo() { const h = new Date().getHours(); return h >= 6 && h < 14 ? 'Buenos días' : h >= 14 && h < 21 ? 'Buenas tardes' : 'Buenas noches'; }
 function nombreSaludo() { if (esRecepcion()) return 'Recepción'; return (yo()?.nombre || '').split(' ')[0]; }
-function elegirFrase() {
-  let i = Math.floor(Math.random() * FRASES.length);
-  try { const ult = +localStorage.getItem('agenda-frase'); if (i === ult) i = (i + 1) % FRASES.length; localStorage.setItem('agenda-frase', i); } catch (e) { }
-  S.frase = FRASES[i];
+// saca frases de una "bolsa" barajada: no se repite ninguna hasta que han salido todas
+function deLaBolsa(clave, n) {
+  let bolsa = [];
+  try { bolsa = JSON.parse(localStorage.getItem(clave) || '[]').filter(i => Number.isInteger(i) && i < n); } catch (e) { }
+  if (!bolsa.length) { bolsa = [...Array(n).keys()]; for (let i = n - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [bolsa[i], bolsa[j]] = [bolsa[j], bolsa[i]]; } }
+  const i = bolsa.pop();
+  try { localStorage.setItem(clave, JSON.stringify(bolsa)); } catch (e) { }
+  return i;
 }
-
+const esCumple = (t, d = new Date()) => { if (!t || !t.fecha_nacimiento) return false; const [, m, dd] = String(t.fecha_nacimiento).split('-').map(Number); return m === d.getMonth() + 1 && dd === d.getDate(); };
+function festivoTrabajado(k) {
+  const e = (S.especiales || {})[k], base = (S.horario || {})[isoDia(k)];
+  return !!(e && e.abierto && ((base && !base.abierto) || /festiv/i.test(e.motivo || '')));
+}
+function elegirFrase() {
+  const hoy = new Date(), m = hoy.getMonth() + 1, d = hoy.getDate(), y = hoy.getFullYear(), k = dkey(hoy);
+  const nom = nombreSaludo(), quien = esRecepcion() ? '' : ', ' + nom;
+  S.cumple = !esRecepcion() && esCumple(yo());
+  if (S.cumple) { S.frase = [`Hoy es tu día. Que este año te traiga salud, calma y muchas alegrías.`, 'De parte de todo el equipo', 'cumple']; return; }
+  const cumpleHoy = esRecepcion() ? S.trabajadores.filter(t => t.activo && esCumple(t)) : [];
+  if (cumpleHoy.length) { S.frase = [`Hoy es el cumpleaños de ${cumpleHoy.map(t => t.nombre).join(' y ')}. ¡No olvidéis felicitar${cumpleHoy.length > 1 ? 'les' : 'le'}!`, 'Cumpleaños en el equipo', 'cumple']; return; }
+  if (m === 12 && (d === 24 || d === 25)) { S.frase = [`¡Feliz Navidad${quien}! Que estos días vengan llenos de paz y buenos momentos.`, 'Navidad', 'fiesta']; return; }
+  if (m === 12 && d === 31) { S.frase = [`Último día del año: gracias por cada cita, cada sonrisa y cada esfuerzo. ¡Feliz salida de año!`, 'Fin de año', 'fiesta']; return; }
+  if (m === 1 && d <= 5) { S.frase = [`¡Feliz Año ${y}${quien}! Que este año venga cargado de salud, equilibrio y buenos proyectos.`, 'Año Nuevo', 'fiesta']; return; }
+  if (m === 1 && d === 6) { S.frase = [`¡Felices Reyes${quien}! Que hoy os traigan descanso, ilusión y algún buen regalo.`, 'Día de Reyes', 'fiesta']; return; }
+  if (festivoTrabajado(k)) { S.frase = FRASES_FESTIVO[deLaBolsa('agenda-frases-festivo', FRASES_FESTIVO.length)].concat('festivo'); return; }
+  S.frase = FRASES[deLaBolsa('agenda-frases', FRASES.length)];
+}
 /* ================= estructura ================= */
 const LOGO = '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M8 14h3M13 14h3M8 17h3" stroke-linecap="round"/></svg>';
 const ICONOS = {
@@ -452,10 +547,10 @@ function pestañas() {
 function render() {
   $('#app').innerHTML = `<div class="wrap">
     <header class="top"><div class="logo">${LOGO}</div>
-      <div class="t"><h1>${saludo()}${nombreSaludo() ? ', ' + esc(nombreSaludo()) : ''}</h1><small>${esc(S.ajustes.nombre_centro || 'Mi centro')}${esRecepcion() ? ' · Recepción' : ''}${DEMO ? ' · <span class="demo-tag">Demo</span>' : ''}</small></div>
+      <div class="t"><h1>${S.cumple ? '¡Feliz cumpleaños, ' + esc(nombreSaludo()) + '!' : saludo() + (nombreSaludo() ? ', ' + esc(nombreSaludo()) : '')}</h1><small>${esc(S.ajustes.nombre_centro || 'Mi centro')}${esRecepcion() ? ' · Recepción' : ''}${DEMO ? ' · <span class="demo-tag">Demo</span>' : ''}</small></div>
       <button class="bell" id="bell" aria-label="Avisos" onclick="abrirAvisos()">${BELL}<b id="bell-n" hidden></b></button>
     </header>
-    ${S.frase ? `<p class="frase">«${esc(S.frase[0])}» <span>— ${esc(S.frase[1])}</span></p>` : ''}
+    ${S.frase ? (S.frase[2] ? `<p class="frase especial ${S.frase[2]}">${esc(S.frase[0])} <span>— ${esc(S.frase[1])}</span></p>` : `<p class="frase">«${esc(S.frase[0])}» <span>— ${esc(S.frase[1])}</span></p>`) : ''}
     <main id="view"></main></div>
     <nav class="tabs" aria-label="Secciones">${pestañas().map(([k, l]) => `<button data-tab="${k}" aria-current="${S.tab === k ? 'page' : 'false'}" onclick="irA('${k}')">${ICONOS[k]}${l}</button>`).join('')}</nav>`;
   renderVista(); pintarCampana();
@@ -1402,6 +1497,7 @@ function editarTrabajador(id) {
     <div class="field"><label for="t-nombre">Nombre</label><input id="t-nombre" value="${esc(t.nombre)}"></div>
     <div class="two"><div class="field"><label for="t-email">Email de acceso</label><input id="t-email" type="email" value="${esc(t.email || '')}" placeholder="nombre@correo.com"></div>
       <div class="field"><label for="t-tel">Teléfono</label><input id="t-tel" inputmode="tel" value="${esc(t.telefono || '')}"></div></div>
+    ${S.trabajadores.some(x => 'fecha_nacimiento' in x) ? `<div class="field"><label for="t-nac">Fecha de nacimiento (opcional)</label><input id="t-nac" type="date" value="${esc(t.fecha_nacimiento || '')}"><small class="muted">La app le felicitará el día de su cumpleaños y avisará a recepción.</small></div>` : ''}
     <div class="field"><span class="flabel">A qué se dedica (puede ser más de una cosa)</span><div class="checks">${S.actividades.map(a => `<label><input type="checkbox" name="t-act" value="${a.id}" ${acts.has(a.id) ? 'checked' : ''}><i style="width:10px;height:10px;border-radius:3px;background:${esc(a.color)}"></i>${esc(a.nombre)}</label>`).join('')}</div></div>
     <div class="field"><span class="flabel">Cabinas habituales · ● principal</span><div class="checks">${S.cabinas.filter(c => c.activa).map(c => `<label><input type="checkbox" name="t-cab" value="${c.id}" ${cabs.some(x => x.cabina_id === c.id) ? 'checked' : ''}>${esc(c.nombre)}<input type="radio" name="t-pri" value="${c.id}" ${principal === c.id ? 'checked' : ''} aria-label="Principal" style="margin-left:auto"></label>`).join('') || '<span class="muted">Primero crea cabinas.</span>'}</div></div>
     <label class="switch"><span><b>Ve su facturación</b><br><small class="muted">Para autónomos: verá lo facturado en sus propias citas, nunca el total del centro.</small></span><input type="checkbox" id="t-fact" ${t.ver_facturacion ? 'checked' : ''}></label>
@@ -1413,6 +1509,7 @@ function editarTrabajador(id) {
 async function guardarTrabajador(id) {
   const err = $('#t-err');
   const d = { nombre: $('#t-nombre').value.trim(), email: $('#t-email').value.trim().toLowerCase() || null, telefono: $('#t-tel').value.trim() || null, ver_facturacion: $('#t-fact').checked, activo: $('#t-act-on').checked };
+  if ($('#t-nac')) d.fecha_nacimiento = $('#t-nac').value || null;
   if (!d.nombre) { err.textContent = 'Escribe el nombre.'; return; }
   const acts = [...document.querySelectorAll('input[name=t-act]:checked')].map(i => i.value);
   const cabs = [...document.querySelectorAll('input[name=t-cab]:checked')].map(i => i.value);
