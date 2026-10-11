@@ -1262,8 +1262,8 @@ function pintarCliente() {
   if (F.creandoCliente) {
     const [pila, ...ap] = (F.nuevoNombre || '').split(' ');
     box.innerHTML = `<div class="box info" style="margin-top:0"><b>Cliente nuevo</b>${esRecepcion() ? '' : '<br><small class="muted">Quedará en tu lista. Cuando venga, recepción completará sus datos y lo dará de alta en el centro.</small>'}
-      <div class="two"><div class="field"><label for="nc-nombre">Nombre</label><input id="nc-nombre" value="${esc(pila || '')}" autocomplete="off"></div>
-        <div class="field"><label for="nc-apellidos">Apellidos</label><input id="nc-apellidos" value="${esc(ap.join(' '))}" autocomplete="off"></div></div>
+      <div class="two"><div class="field"><label for="nc-nombre">Nombre</label><input id="nc-nombre" onblur="this.value=capitalizar(this.value)" value="${esc(pila || '')}" autocomplete="off"></div>
+        <div class="field"><label for="nc-apellidos">Apellidos</label><input id="nc-apellidos" onblur="this.value=capitalizar(this.value)" value="${esc(ap.join(' '))}" autocomplete="off"></div></div>
       <div class="field"><label for="nc-tel-num">Teléfono</label>${campoTel('nc-tel', '', 'ES')}</div>
       <div class="two"><div class="field"><label for="nc-nac">Fecha de nacimiento</label><input id="nc-nac" type="date"></div>
         <div class="field"><label for="nc-lang">Idioma</label><select id="nc-lang">${Object.entries(LANGS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div></div>
@@ -1287,7 +1287,7 @@ function pintarCliente() {
     const t = normNombre(q.value), td = q.value.replace(/\D/g, '');
     box.querySelectorAll('.azh button').forEach(b => b.removeAttribute('aria-pressed'));
     if (!t) { $('#f-cli-res').innerHTML = ''; return; }
-    pintar(lista.filter(c => normNombre(c.nombre).includes(t) || (td.length >= 3 && (c.telefono || '').includes(td))).slice(0, 30), q.value.trim());
+    pintar(lista.filter(c => coincideNombre(c.nombre, q.value) || (td.length >= 3 && (c.telefono || '').includes(td))).slice(0, 30), capitalizar(q.value));
   };
   box.querySelectorAll('.azh button').forEach(b => b.onclick = () => {
     box.querySelectorAll('.azh button').forEach(x => x.setAttribute('aria-pressed', x === b)); q.value = '';
@@ -1322,7 +1322,7 @@ async function guardarCita() {
   const fin = () => { btn.disabled = false; btn.textContent = 'Guardar cita'; };
   let clienteId = F.cliente ? F.cliente.id : null;
   if (!clienteId) {
-    const pila = ($('#nc-nombre').value || '').trim(), apell = ($('#nc-apellidos').value || '').trim(), nombre = [pila, apell].filter(Boolean).join(' ');
+    const pila = capitalizar($('#nc-nombre').value), apell = capitalizar($('#nc-apellidos').value), nombre = [pila, apell].filter(Boolean).join(' ');
     if (!pila) { err.textContent = 'Escribe el nombre del cliente.'; fin(); return; }
     const tl = leerTel('nc-tel'); if (tl.error) { err.textContent = tl.error; fin(); return; }
     const fnac = $('#nc-nac').value || null;
@@ -1423,6 +1423,22 @@ function leerTel(id) {
 const hayFicha = () => S.clientes.some(c => 'nombre_pila' in c);
 const sinAcentos = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '');
 const normNombre = s => sinAcentos(s).toLowerCase().replace(/\s+/g, ' ').trim();
+// búsqueda sin distinguir mayúsculas, minúsculas ni acentos; vale en cualquier orden («martinez maria»)
+function coincideNombre(nombre, consulta) {
+  const n = normNombre(nombre), toks = normNombre(consulta).split(' ').filter(Boolean);
+  return toks.every(t => n.includes(t));
+}
+// «maria de la fuente» → «Maria de la Fuente»; respeta lo escrito con mayúsculas mezcladas («McDonald»)
+const PARTICULAS = new Set(['de', 'del', 'la', 'las', 'los', 'y', 'e', 'da', 'das', 'do', 'dos', 'van', 'von', 'der', 'den', 'di', 'du', 'le']);
+function capitalizar(t) {
+  return String(t || '').trim().replace(/\s+/g, ' ').split(' ').map((w, i) => {
+    if (!w) return w;
+    const min = w.toLocaleLowerCase('es');
+    if (i > 0 && PARTICULAS.has(min)) return min;
+    if (w !== min && w !== w.toLocaleUpperCase('es')) return w;
+    return min.replace(/(^|[-'’])(\p{L})/gu, (m, a, b) => a + b.toLocaleUpperCase('es'));
+  }).join(' ');
+}
 const LETRAS = 'ABCDEFGHIJKLMNÑOPQRSTUVWXYZ#'.split('');
 function letraDe(nombre) {
   const c = String(nombre || '').trim().charAt(0).toUpperCase();
@@ -1583,7 +1599,7 @@ function filaCliente(c) {
 }
 function vistaClientes() {
   const t = normNombre(S.q), td = S.q.replace(/\D/g, '');
-  const coincide = c => !t || normNombre(c.nombre).includes(t) || (td.length >= 3 && (c.telefono || '').includes(td));
+  const coincide = c => !t || coincideNombre(c.nombre, S.q) || (td.length >= 3 && (c.telefono || '').includes(td));
   const base = misClientes().filter(coincide).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
   const pend = esRecepcion() ? base.filter(pendienteAlta) : [];
   const l = esRecepcion() ? base.filter(c => !pendienteAlta(c)) : base;
@@ -1621,11 +1637,11 @@ function formCliente(c) {
   const ficha = hayFicha();
   const pila = ficha ? (c.nombre_pila ?? (c.nombre || '').split(' ')[0]) : c.nombre;
   const apell = ficha ? (c.apellidos ?? (c.nombre || '').split(' ').slice(1).join(' ')) : '';
-  return `${ficha ? `<div class="two"><div class="field"><label for="c-nombre">Nombre *</label><input id="c-nombre" value="${esc(pila || '')}" autocomplete="off"></div>
-      <div class="field"><label for="c-apellidos">Apellidos *</label><input id="c-apellidos" value="${esc(apell || '')}" autocomplete="off"></div></div>
+  return `${ficha ? `<div class="two"><div class="field"><label for="c-nombre">Nombre *</label><input id="c-nombre" onblur="this.value=capitalizar(this.value)" value="${esc(pila || '')}" autocomplete="off"></div>
+      <div class="field"><label for="c-apellidos">Apellidos *</label><input id="c-apellidos" onblur="this.value=capitalizar(this.value)" value="${esc(apell || '')}" autocomplete="off"></div></div>
     <div class="two"><div class="field"><label for="c-nac">Fecha de nacimiento</label><input id="c-nac" type="date" value="${esc(c.fecha_nacimiento || '')}"></div>
       <div class="field"><label for="c-sexo">Sexo</label><select id="c-sexo"><option value="">—</option>${[['mujer', 'Mujer'], ['hombre', 'Hombre'], ['otro', 'Otro'], ['nd', 'Prefiere no decirlo']].map(([k, v]) => `<option value="${k}" ${c.sexo === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div></div>`
-    : `<div class="field"><label for="c-nombre">Nombre y apellidos</label><input id="c-nombre" value="${esc(c.nombre || '')}"></div>`}
+    : `<div class="field"><label for="c-nombre">Nombre y apellidos</label><input id="c-nombre" onblur="this.value=capitalizar(this.value)" value="${esc(c.nombre || '')}"></div>`}
     <div class="field"><label for="c-tel-num">Teléfono</label>${campoTel('c-tel', c.telefono, c.pais_telefono)}<small class="muted">Elige el país o pega el número con su prefijo (+44…) y se detecta solo.</small></div>
     <div class="two"><div class="field"><label for="c-email">Email</label><input id="c-email" type="email" value="${esc(c.email || '')}"></div>
       <div class="field"><label for="c-lang">Idioma</label><select id="c-lang">${Object.entries(LANGS).map(([k, v]) => `<option value="${k}" ${k === (c.idioma || 'es') ? 'selected' : ''}>${v}</option>`).join('')}</select></div></div>
@@ -1641,7 +1657,7 @@ function formCliente(c) {
 function datosFormCliente(orig = {}) {
   const tl = leerTel('c-tel'); if (tl.error) return { error: tl.error };
   if (!hayFicha()) { const nombre = $('#c-nombre').value.trim(); if (!nombre) return { error: 'Escribe el nombre.' }; return { d: { nombre, telefono: tl.telefono, idioma: $('#c-lang').value, email: $('#c-email').value.trim() || null, notas: $('#c-notas').value.trim() || null } }; }
-  const pila = $('#c-nombre').value.trim(), apell = $('#c-apellidos').value.trim();
+  const pila = capitalizar($('#c-nombre').value), apell = capitalizar($('#c-apellidos').value);
   if (!pila) return { error: 'Escribe el nombre.' };
   if (!apell) return { error: 'Escribe al menos un apellido: ayuda a distinguir clientes con el mismo nombre.' };
   const cons = $('#c-cons').checked, salud = $('#c-salud').value.trim();
@@ -1670,8 +1686,8 @@ function unirCliente(id) {
     <div id="u-res"></div>
     <div class="actions"><button class="ghost" onclick="abrirCliente('${id}')">Volver</button></div>`);
   const pintar = () => {
-    const t = $('#u-q').value.trim().toLowerCase();
-    const m = S.clientes.filter(x => x.id !== id && !pendienteAlta(x) && (!t || x.nombre.toLowerCase().includes(t) || (x.telefono || '').replace(/\s/g, '').includes(t.replace(/\s/g, '')))).slice(0, 8);
+    const t = $('#u-q').value.trim(), td = t.replace(/\D/g, '');
+    const m = S.clientes.filter(x => x.id !== id && !pendienteAlta(x) && (!t || coincideNombre(x.nombre, t) || (td.length >= 3 && (x.telefono || '').includes(td)) || (x.telefono || '').replace(/\s/g, '').includes(t.replace(/\s/g, '')))).slice(0, 8);
     $('#u-res').innerHTML = `<div class="results">${m.map(x => `<button type="button" data-id="${x.id}"><b>${esc(x.nombre)}</b> <small class="muted">${esc(x.telefono || '')}</small></button>`).join('') || '<button type="button" disabled>Ningún cliente coincide</button>'}</div>`;
     $('#u-res').querySelectorAll('button[data-id]').forEach(b => b.onclick = async () => {
       const destino = cli(b.dataset.id);
