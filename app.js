@@ -30,7 +30,8 @@ const S = {
   user: null, rol: null, meId: null, puedeFacturar: false,
   ajustes: {}, actividades: [], trabajadores: [], tAct: {}, tCab: {}, cabinas: [], servicios: [], precios: {}, clientes: [], hist: {}, vinculados: new Set(),
   citas: [], choques: new Set(), avisos: [],
-  tab: 'agenda', day: dkey(new Date()), filtroAct: '', q: '',
+  tab: 'agenda', day: dkey(new Date()), filtroAct: '', filtroTrab: '', q: '',
+  vista: (() => { try { return localStorage.getItem('agenda-vista') || 'dia'; } catch (e) { return 'dia'; } })(),
   fPeriodo: 'dia', fRef: dkey(new Date())
 };
 const esRecepcion = () => S.rol === 'recepcion';
@@ -320,9 +321,10 @@ async function cargarHistorial() {
 }
 async function cargarClientes() { const r = await sb.from('clientes').select('*').order('nombre'); if (!r.error) S.clientes = r.data; }
 async function cargarDia() {
-  const a = startOf(S.day), b = startOf(addDays(S.day, 1));
+  const { a, b } = rangoAgenda();
+  const campos = S.vista === 'anio' ? 'id,inicio,fin,estado,trabajador_id,servicio_id,cabina_id,cliente_id' : '*';
   const [c, ch] = await Promise.all([
-    sb.from('citas').select('*').gte('inicio', a.toISOString()).lt('inicio', b.toISOString()).order('inicio'),
+    sb.from('citas').select(campos).gte('inicio', a.toISOString()).lt('inicio', b.toISOString()).order('inicio').limit(5000),
     sb.rpc('citas_con_choque', { p_desde: a.toISOString(), p_hasta: b.toISOString() })
   ]);
   S.citas = c.error ? [] : c.data;
@@ -409,72 +411,174 @@ function pintarCampana() {
 
 /* ================= agenda ================= */
 const PX = 28; // píxeles por 15 minutos
+const VISTAS = { dia: 'Día', semana: 'Semana', mes: 'Mes', anio: 'Año' };
+const DSEM = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+const lunesDe = k => { const d = new Date(k + 'T12:00'); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return dkey(d); };
+function rangoAgenda() {
+  const d = new Date(S.day + 'T12:00');
+  if (S.vista === 'semana') { const a = lunesDe(S.day); return { a: startOf(a), b: startOf(addDays(a, 7)) }; }
+  if (S.vista === 'mes') return { a: new Date(d.getFullYear(), d.getMonth(), 1), b: new Date(d.getFullYear(), d.getMonth() + 1, 1) };
+  if (S.vista === 'anio') return { a: new Date(d.getFullYear(), 0, 1), b: new Date(d.getFullYear() + 1, 0, 1) };
+  return { a: startOf(S.day), b: startOf(addDays(S.day, 1)) };
+}
+function etiquetaAgenda() {
+  const d = new Date(S.day + 'T12:00');
+  if (S.vista === 'semana') { const a = new Date(lunesDe(S.day) + 'T12:00'), e = new Date(a); e.setDate(e.getDate() + 6); return `${fechaCorta(a)} – ${fechaCorta(e)} ${e.getFullYear()}`; }
+  if (S.vista === 'mes') return d.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+  if (S.vista === 'anio') return String(d.getFullYear());
+  return d.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
+}
+function moverAgenda(n) {
+  const d = new Date(S.day + 'T12:00');
+  if (S.vista === 'semana') d.setDate(d.getDate() + 7 * n);
+  else if (S.vista === 'mes') d.setMonth(d.getMonth() + n, 1);
+  else if (S.vista === 'anio') d.setFullYear(d.getFullYear() + n, 0, 1);
+  else d.setDate(d.getDate() + n);
+  S.day = dkey(d); recargarDia();
+}
+function cambiarVista(v) { S.vista = v; try { localStorage.setItem('agenda-vista', v); } catch (e) { } recargarDia(); }
+function irADia(k) { S.day = k; S.vista = 'dia'; recargarDia(); }
 function columnas() {
   if (!esRecepcion()) return [yo()].filter(Boolean);
   const conCita = new Set(S.citas.filter(c => c.estado !== 'cancelada').map(c => c.trabajador_id));
-  return S.trabajadores.filter(t => (t.activo || conCita.has(t.id)) && (!S.filtroAct || (S.tAct[t.id] && S.tAct[t.id].has(S.filtroAct))));
+  return S.trabajadores.filter(t => (t.activo || conCita.has(t.id)) && (!S.filtroAct || (S.tAct[t.id] && S.tAct[t.id].has(S.filtroAct))) && (!S.filtroTrab || t.id === S.filtroTrab));
 }
+// citas que se muestran en semana/mes/año según los filtros
+function citasFiltradas() {
+  const ids = new Set(columnas().map(t => t.id));
+  return S.citas.filter(c => c.estado !== 'cancelada' && ids.has(c.trabajador_id));
+}
+// reparte las citas que se solapan en carriles para que no se tapen
+function carriles(lista) {
+  const res = new Map(); let grupo = [], finGrupo = 0;
+  const cerrar = () => { const fin = []; grupo.forEach(c => { const s = +new Date(c.inicio); let i = fin.findIndex(f => f <= s); if (i < 0) { i = fin.length; fin.push(0); } fin[i] = +new Date(c.fin); res.set(c.id, { i }); }); grupo.forEach(c => res.get(c.id).n = fin.length); grupo = []; };
+  [...lista].sort((x, y) => x.inicio.localeCompare(y.inicio)).forEach(c => { const s = +new Date(c.inicio); if (grupo.length && s >= finGrupo) cerrar(); grupo.push(c); finGrupo = Math.max(finGrupo, +new Date(c.fin)); });
+  if (grupo.length) cerrar();
+  return res;
+}
+function bloqueCita(c, OPEN, extra = '', conTrab = false) {
+  const s = srv(c.servicio_id), a = act(s.actividad_id), ini = new Date(c.inicio), fin = new Date(c.fin);
+  const m0 = ini.getHours() * 60 + ini.getMinutes(), dur = (fin - ini) / 60000;
+  const top = Math.max(0, (m0 - OPEN) / 15 * PX), h = Math.max(dur / 15 * PX - 2, 22);
+  const pend = S.avisos.filter(x => x.cita_id === c.id && !x.leido_en);
+  const nueva = pend.some(paraMi), sinConf = esRecepcion() && pend.some(x => x.para_rol === 'trabajador');
+  const choque = S.choques.has(c.id);
+  const cls = [c.estado === 'realizada' ? 'realizada' : '', c.estado === 'no vino' ? 'novino' : '', choque ? 'choque' : ''].join(' ');
+  const flags = [choque ? '<span class="flag red">Cabina compartida</span>' : '', nueva ? '<span class="flag new">Nueva</span>' : '', sinConf ? '<span class="flag wait">Sin confirmar</span>' : ''].join(' ');
+  return `<button class="appt ${cls}" style="--c:${esc(a.color)};top:${top}px;height:${h}px;${extra}" onclick="event.stopPropagation();abrirCita('${c.id}')">
+    <b>${hhmm(ini)} ${esc(cli(c.cliente_id).nombre)}</b><span>${conTrab ? esc(trab(c.trabajador_id).nombre) + ' · ' : ''}${esc(s.nombre)}</span><span>${esc(cab(c.cabina_id).nombre)}${c.estado !== 'confirmada' ? ' · ' + ESTADOS[c.estado] : ''}</span>${flags}</button>`;
+}
+function horasGrid(OPEN, CLOSE) { let h = ''; for (let m = OPEN; m < CLOSE; m += 60) h += `<span style="top:${(m - OPEN) / 15 * PX}px">${minToT(m)}</span>`; return h; }
+function lineaAhora(OPEN, CLOSE, left = '48px', width = null) {
+  const n = new Date(), m = n.getHours() * 60 + n.getMinutes();
+  if (m < OPEN || m > CLOSE) return '';
+  return `<div class="now" style="top:${(m - OPEN) / 15 * PX}px;left:${left};${width ? 'right:auto;width:' + width : ''}"></div>`;
+}
+
 function vistaAgenda() {
-  const OPEN = toMin(S.ajustes.hora_apertura || '09:00'), CLOSE = toMin(S.ajustes.hora_cierre || '21:00');
-  const label = new Date(S.day + 'T12:00').toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
-  const cols = columnas();
-  const visibles = S.citas.filter(c => c.estado !== 'cancelada' && cols.some(t => t.id === c.trabajador_id));
-  const canceladas = S.citas.filter(c => c.estado === 'cancelada');
-  const H = (CLOSE - OPEN) / 15 * PX;
-  let horas = ''; for (let m = OPEN; m < CLOSE; m += 60) horas += `<span style="top:${(m - OPEN) / 15 * PX}px">${minToT(m)}</span>`;
-  const prevision = S.citas.filter(c => c.estado === 'confirmada').reduce((s, c) => s + (S.precios[c.servicio_id] || 0), 0);
+  const lista = S.vista === 'dia' ? null : citasFiltradas();
+  const visibles = S.vista === 'dia' ? S.citas.filter(c => c.estado !== 'cancelada' && columnas().some(t => t.id === c.trabajador_id)) : lista;
+  const prevision = visibles.filter(c => c.estado === 'confirmada').reduce((s, c) => s + (S.precios[c.servicio_id] || 0), 0);
   const nChoques = visibles.filter(c => S.choques.has(c.id)).length;
-
-  const htmlCols = cols.map(t => {
-    const bloques = visibles.filter(c => c.trabajador_id === t.id).map(c => {
-      const s = srv(c.servicio_id), a = act(s.actividad_id), ini = new Date(c.inicio), fin = new Date(c.fin);
-      const m0 = ini.getHours() * 60 + ini.getMinutes(), dur = (fin - ini) / 60000;
-      const top = Math.max(0, (m0 - OPEN) / 15 * PX), h = Math.max(dur / 15 * PX - 2, 22);
-      const pend = S.avisos.filter(x => x.cita_id === c.id && !x.leido_en);
-      const nueva = pend.some(paraMi), sinConf = esRecepcion() && pend.some(x => x.para_rol === 'trabajador');
-      const choque = S.choques.has(c.id);
-      const cls = [c.estado === 'realizada' ? 'realizada' : '', c.estado === 'no vino' ? 'novino' : '', choque ? 'choque' : ''].join(' ');
-      const flags = [choque ? '<span class="flag red">Cabina compartida</span>' : '', nueva ? '<span class="flag new">Nueva</span>' : '', sinConf ? '<span class="flag wait">Sin confirmar</span>' : ''].join(' ');
-      return `<button class="appt ${cls}" style="--c:${esc(a.color)};top:${top}px;height:${h}px" onclick="event.stopPropagation();abrirCita('${c.id}')">
-        <b>${hhmm(ini)} ${esc(cli(c.cliente_id).nombre)}</b><span>${esc(s.nombre)}</span><span>${esc(cab(c.cabina_id).nombre)}${c.estado !== 'confirmada' ? ' · ' + ESTADOS[c.estado] : ''}</span>${flags}</button>`;
-    }).join('');
-    return `<div class="col" style="height:${H}px" onclick="clicHueco(event,'${t.id}')">${bloques}</div>`;
-  }).join('');
-
-  let ahora = '';
-  if (S.day === dkey(new Date())) { const n = new Date(), m = n.getHours() * 60 + n.getMinutes(); if (m >= OPEN && m <= CLOSE) ahora = `<div class="now" style="top:${(m - OPEN) / 15 * PX}px"></div>`; }
-
+  const cuerpo = { dia: cuerpoDia, semana: cuerpoSemana, mes: cuerpoMes, anio: cuerpoAnio }[S.vista] || cuerpoDia;
   return `
+  <div class="chips" style="padding-top:8px">${Object.entries(VISTAS).map(([k, v]) => `<button aria-pressed="${S.vista === k}" onclick="cambiarVista('${k}')">${v}</button>`).join('')}</div>
   <div class="daybar">
-    <button class="iconbtn" aria-label="Día anterior" onclick="cambiarDia(-1)">‹</button>
-    <div class="date">${esc(label)}</div>
-    <button class="iconbtn" aria-label="Día siguiente" onclick="cambiarDia(1)">›</button>
+    <button class="iconbtn" aria-label="Anterior" onclick="moverAgenda(-1)">‹</button>
+    <div class="date">${esc(etiquetaAgenda())}</div>
+    <button class="iconbtn" aria-label="Siguiente" onclick="moverAgenda(1)">›</button>
   </div>
   <div class="toolbar">
     <button class="pill" onclick="irHoy()">Hoy</button>
-    <input type="date" id="pick-day" class="pill" value="${S.day}" onchange="if(this.value){S.day=this.value;recargarDia()}" aria-label="Elegir día">
+    <input type="date" id="pick-day" class="pill" value="${S.day}" onchange="if(this.value){S.day=this.value;recargarDia()}" aria-label="Elegir fecha">
+    ${esRecepcion() && S.vista !== 'dia' ? `<select id="f-trab-filtro" class="pill" onchange="S.filtroTrab=this.value;renderVista()" aria-label="Filtrar por trabajador"><option value="">Todo el equipo</option>${S.trabajadores.filter(t => t.activo).map(t => `<option value="${t.id}" ${S.filtroTrab === t.id ? 'selected' : ''}>${esc(t.nombre)}</option>`).join('')}</select>` : ''}
     <span class="grow"></span>
     <button class="primary" onclick="abrirFormulario()">+ Cita</button>
   </div>
   <div class="summary" style="padding-bottom:10px"><span><b>${visibles.length}</b> ${visibles.length === 1 ? 'cita' : 'citas'}</span>${S.puedeFacturar ? `<span>Previsto <b>${eur(prevision)}</b></span>` : ''}${nChoques ? `<span class="bad"><b class="bad">${nChoques}</b> en cabina compartida</span>` : ''}</div>
-  ${esRecepcion() && S.actividades.length > 1 ? `<div class="chips"><button aria-pressed="${!S.filtroAct}" onclick="S.filtroAct='';renderVista()">Todo el equipo</button>${S.actividades.filter(a => a.activa).map(a => `<button aria-pressed="${S.filtroAct === a.id}" onclick="S.filtroAct='${a.id}';renderVista()"><i style="background:${esc(a.color)}"></i>${esc(a.nombre)}</button>`).join('')}</div>` : ''}
-  ${cols.length ? `<div class="gridwrap"><div class="grid" style="--cols:${cols.length};--hour:${4 * PX}px">
-    <div class="ghead"><div></div>${cols.map(t => `<div>${esc(t.nombre)}<small>${esc([...(S.tAct[t.id] || [])].map(id => act(id).nombre).join(', ') || 'Sin actividad')}</small></div>`).join('')}</div>
-    <div class="gbody"><div class="times" style="height:${H}px">${horas}</div>${htmlCols}${ahora}</div>
-  </div></div>` : `<div class="list"><p class="row muted">${esRecepcion() ? 'Aún no hay trabajadores. Añádelos en Ajustes → Equipo.' : 'Tu ficha de trabajador no está activa. Habla con recepción.'}</p></div>`}
+  ${esRecepcion() && S.actividades.length > 1 ? `<div class="chips"><button aria-pressed="${!S.filtroAct}" onclick="S.filtroAct='';renderVista()">Todas las actividades</button>${S.actividades.filter(a => a.activa).map(a => `<button aria-pressed="${S.filtroAct === a.id}" onclick="S.filtroAct='${a.id}';renderVista()"><i style="background:${esc(a.color)}"></i>${esc(a.nombre)}</button>`).join('')}</div>` : ''}
+  ${cuerpo(lista)}
   <div class="legend">${S.actividades.filter(a => a.activa).map(a => `<span><i style="width:10px;height:10px;border-radius:3px;background:${esc(a.color)};display:inline-block"></i>${esc(a.nombre)}</span>`).join('')}<span><span class="flag red" style="margin:0">Cabina compartida</span></span>${esRecepcion() ? '<span><span class="flag wait" style="margin:0">Sin confirmar</span> el trabajador aún no ha pulsado «Recibido»</span>' : ''}</div>
-  ${canceladas.length ? `<div class="sect">Canceladas este día (${canceladas.length})</div><div class="list">${canceladas.map(c => `<button class="row" onclick="abrirCita('${c.id}')"><span class="main"><b>${hhmm(new Date(c.inicio))} · ${esc(cli(c.cliente_id).nombre)}</b><small>${esc(srv(c.servicio_id).nombre)} · ${esc(trab(c.trabajador_id).nombre)}</small></span></button>`).join('')}</div>` : ''}
-  <p class="note">Toca un hueco libre para crear una cita a esa hora. Los cambios aparecen al momento en todos los dispositivos.</p>`;
+  <p class="note">${S.vista === 'dia' || S.vista === 'semana' ? 'Toca un hueco libre para crear una cita a esa hora.' : 'Toca un día para verlo en detalle.'} Los cambios aparecen al momento en todos los dispositivos.</p>`;
 }
+
+function cuerpoDia() {
+  const OPEN = toMin(S.ajustes.hora_apertura || '09:00'), CLOSE = toMin(S.ajustes.hora_cierre || '21:00');
+  const cols = columnas(), H = (CLOSE - OPEN) / 15 * PX;
+  const visibles = S.citas.filter(c => c.estado !== 'cancelada' && cols.some(t => t.id === c.trabajador_id));
+  const canceladas = S.citas.filter(c => c.estado === 'cancelada');
+  if (!cols.length) return `<div class="list"><p class="row muted">${esRecepcion() ? 'No hay trabajadores con este filtro. Añádelos en Ajustes → Equipo.' : 'Tu ficha de trabajador no está activa. Habla con recepción.'}</p></div>`;
+  const htmlCols = cols.map(t => `<div class="col" style="height:${H}px" onclick="clicHueco(event,'${t.id}')">${visibles.filter(c => c.trabajador_id === t.id).map(c => bloqueCita(c, OPEN)).join('')}</div>`).join('');
+  return `<div class="gridwrap"><div class="grid" style="--cols:${cols.length};--hour:${4 * PX}px">
+    <div class="ghead"><div></div>${cols.map(t => `<div>${esc(t.nombre)}<small>${esc([...(S.tAct[t.id] || [])].map(id => act(id).nombre).join(', ') || 'Sin actividad')}</small></div>`).join('')}</div>
+    <div class="gbody"><div class="times" style="height:${H}px">${horasGrid(OPEN, CLOSE)}</div>${htmlCols}${S.day === dkey(new Date()) ? lineaAhora(OPEN, CLOSE) : ''}</div>
+  </div></div>
+  ${canceladas.length ? `<div class="sect">Canceladas este día (${canceladas.length})</div><div class="list">${canceladas.map(c => `<button class="row" onclick="abrirCita('${c.id}')"><span class="main"><b>${hhmm(new Date(c.inicio))} · ${esc(cli(c.cliente_id).nombre)}</b><small>${esc(srv(c.servicio_id).nombre)} · ${esc(trab(c.trabajador_id).nombre)}</small></span></button>`).join('')}</div>` : ''}`;
+}
+
+function cuerpoSemana(lista) {
+  const OPEN = toMin(S.ajustes.hora_apertura || '09:00'), CLOSE = toMin(S.ajustes.hora_cierre || '21:00'), H = (CLOSE - OPEN) / 15 * PX;
+  const lunes = lunesDe(S.day), hoy = dkey(new Date());
+  const dias = [...Array(7)].map((_, i) => addDays(lunes, i));
+  const varios = esRecepcion() && !S.filtroTrab;
+  const cols = dias.map(k => {
+    const delDia = lista.filter(c => dkey(new Date(c.inicio)) === k), car = carriles(delDia);
+    const bloques = delDia.map(c => { const l = car.get(c.id) || { i: 0, n: 1 }; const w = 100 / l.n; return bloqueCita(c, OPEN, `left:calc(${l.i * w}% + 2px);right:auto;width:calc(${w}% - 4px)`, varios); }).join('');
+    return `<div class="col" style="height:${H}px" onclick="clicHueco(event,'${S.filtroTrab || (esRecepcion() ? '' : S.meId)}','${k}')">${bloques}</div>`;
+  }).join('');
+  const iHoy = dias.indexOf(hoy);
+  return `<div class="gridwrap"><div class="grid semana" style="--cols:7;--hour:${4 * PX}px">
+    <div class="ghead"><div></div>${dias.map(k => { const d = new Date(k + 'T12:00'); return `<div class="${k === hoy ? 'hoy' : ''}"><button class="dayhead" onclick="irADia('${k}')">${d.toLocaleDateString('es-ES', { weekday: 'short' })} <b>${d.getDate()}</b></button><small>${(n => n ? n + (n === 1 ? ' cita' : ' citas') : 'Libre')(lista.filter(c => dkey(new Date(c.inicio)) === k).length)}</small></div>`; }).join('')}</div>
+    <div class="gbody"><div class="times" style="height:${H}px">${horasGrid(OPEN, CLOSE)}</div>${cols}${iHoy >= 0 ? lineaAhora(OPEN, CLOSE, `calc(48px + (100% - 48px) / 7 * ${iHoy})`, 'calc((100% - 48px) / 7)') : ''}</div>
+  </div></div>`;
+}
+
+function cuerpoMes(lista) {
+  const d = new Date(S.day + 'T12:00'), y = d.getFullYear(), m = d.getMonth(), hoy = dkey(new Date());
+  const primero = dkey(new Date(y, m, 1, 12)), inicio = lunesDe(primero);
+  const ultimo = new Date(y, m + 1, 0, 12), semanas = Math.ceil((((new Date(primero + 'T12:00').getDay() + 6) % 7) + ultimo.getDate()) / 7);
+  const porDia = {}; lista.forEach(c => (porDia[dkey(new Date(c.inicio))] = porDia[dkey(new Date(c.inicio))] || []).push(c));
+  let celdas = '';
+  for (let i = 0; i < semanas * 7; i++) {
+    const k = addDays(inicio, i), dd = new Date(k + 'T12:00'), fuera = dd.getMonth() !== m;
+    const cs = (porDia[k] || []).sort((a, b) => a.inicio.localeCompare(b.inicio)), ch = cs.some(c => S.choques.has(c.id));
+    celdas += `<button class="mcell ${fuera ? 'fuera' : ''} ${k === hoy ? 'hoy' : ''}" onclick="irADia('${k}')" aria-label="${dd.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}: ${cs.length} citas">
+      <span class="mnum">${dd.getDate()}${ch ? '<i class="mdot" title="Cabina compartida"></i>' : ''}</span>
+      ${cs.slice(0, 3).map(c => `<span class="mline" style="--c:${esc(act(srv(c.servicio_id).actividad_id).color)}">${hhmm(new Date(c.inicio))} ${esc(esRecepcion() && !S.filtroTrab ? trab(c.trabajador_id).nombre : cli(c.cliente_id).nombre)}</span>`).join('')}
+      ${cs.length > 3 ? `<span class="mmore">+${cs.length - 3} más</span>` : ''}
+      ${cs.length ? `<span class="mcount">${cs.length}</span>` : ''}</button>`;
+  }
+  return `<div class="month"><div class="mhead">${DSEM.map(x => `<span>${x}</span>`).join('')}</div><div class="mgrid">${celdas}</div></div>`;
+}
+
+function cuerpoAnio(lista) {
+  const y = new Date(S.day + 'T12:00').getFullYear(), hoy = dkey(new Date());
+  const porDia = {}; lista.forEach(c => { const k = dkey(new Date(c.inicio)); porDia[k] = (porDia[k] || 0) + 1; });
+  const max = Math.max(1, ...Object.values(porDia));
+  const meses = [...Array(12)].map((_, m) => {
+    const primero = new Date(y, m, 1, 12), hueco = (primero.getDay() + 6) % 7, nd = new Date(y, m + 1, 0).getDate();
+    let total = 0, celdas = '<span></span>'.repeat(hueco);
+    for (let dd = 1; dd <= nd; dd++) {
+      const k = dkey(new Date(y, m, dd, 12)), n = porDia[k] || 0; total += n;
+      const nivel = n ? Math.min(4, Math.ceil(n / max * 4)) : 0;
+      celdas += `<button class="ycell n${nivel} ${k === hoy ? 'hoy' : ''}" onclick="irADia('${k}')" title="${dd}: ${n} citas" aria-label="${dd} de ${primero.toLocaleDateString('es-ES', { month: 'long' })}: ${n} citas">${dd}</button>`;
+    }
+    return `<div class="ymonth"><button class="yname" onclick="S.day='${dkey(primero)}';cambiarVista('mes')">${primero.toLocaleDateString('es-ES', { month: 'long' })}<small>${total === 1 ? '1 cita' : total + ' citas'}</small></button>
+      <div class="yhead">${DSEM.map(x => `<span>${x}</span>`).join('')}</div><div class="ygrid">${celdas}</div></div>`;
+  }).join('');
+  return `<div class="year">${meses}</div>
+  <div class="legend"><span>Menos</span>${[0, 1, 2, 3, 4].map(n => `<span class="ycell n${n}" style="width:16px;height:16px;padding:0"></span>`).join('')}<span>Más citas</span></div>`;
+}
+
 async function recargarDia() { await cargarDia(); renderVista(); }
-function cambiarDia(n) { S.day = addDays(S.day, n); recargarDia(); }
+function cambiarDia(n) { moverAgenda(n); }
 function irHoy() { S.day = dkey(new Date()); recargarDia(); }
-function clicHueco(e, tid) {
+function clicHueco(e, tid, fecha) {
   const OPEN = toMin(S.ajustes.hora_apertura || '09:00'), CLOSE = toMin(S.ajustes.hora_cierre || '21:00');
   const r = e.currentTarget.getBoundingClientRect();
   let m = OPEN + Math.floor((e.clientY - r.top) / PX) * 15;
   m = Math.min(Math.max(m, OPEN), CLOSE - 15);
-  abrirFormulario(null, { hora: minToT(m), trabajador_id: tid });
+  abrirFormulario(null, { hora: minToT(m), trabajador_id: tid || '', fecha: fecha || S.day });
 }
 
 /* ================= ficha de cita ================= */
@@ -615,7 +719,7 @@ function abrirFormulario(cita = null, pre = {}) {
   if (!actId && acts[0]) actId = acts[0].id;
   F = {
     id: cita ? cita.id : null, orig: cita,
-    fecha: cita ? dkey(new Date(cita.inicio)) : S.day,
+    fecha: cita ? dkey(new Date(cita.inicio)) : (pre.fecha || S.day),
     hora: cita ? hhmm(new Date(cita.inicio)) : (pre.hora || '10:00'),
     actId, servicioId: cita ? cita.servicio_id : '', trabajadorId: tid, cabinaId: cita ? cita.cabina_id : '',
     cliente: cita && cita.cliente_id ? cli(cita.cliente_id) : (pre.cliente_id ? cli(pre.cliente_id) : null),
@@ -733,7 +837,7 @@ function abrirAvisos() {
 async function verCitaAviso(id) {
   const c = await obtenerCita(id);
   if (!c) { toast('Esa cita ya no existe'); return; }
-  S.day = dkey(new Date(c.inicio)); S.tab = 'agenda'; await cargarDia(); render(); abrirCita(id);
+  S.day = dkey(new Date(c.inicio)); S.vista = 'dia'; S.tab = 'agenda'; await cargarDia(); render(); abrirCita(id);
 }
 async function todoRecibido() {
   const r = await sb.rpc('marcar_todo_recibido');
