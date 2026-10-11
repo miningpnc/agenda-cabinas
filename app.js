@@ -2,6 +2,22 @@
 'use strict';
 
 /* ================= utilidades ================= */
+/* apariencia elegida en este dispositivo (se aplica antes de pintar nada) */
+const TEMAS = [
+  ['auto', 'Automático', ['#f2f4f8', '#0e1320'], '#24406f'], ['claro', 'Claro', ['#f2f4f8', '#ffffff'], '#24406f'],
+  ['oscuro', 'Oscuro', ['#0e1320', '#161e30'], '#0e1320'], ['verde', 'Verde pastel', ['#eef6f0', '#3f7d5c'], '#3f7d5c'],
+  ['azul', 'Azul pastel', ['#edf4fb', '#3a6ea5'], '#3a6ea5'], ['pergamino', 'Pergamino', ['#f3ead8', '#8a5a2b'], '#8a5a2b'],
+  ['minimal', 'Minimalista', ['#ffffff', '#111111'], '#111111']
+];
+function aplicarTema(t) {
+  const r = document.documentElement;
+  if (!t || t === 'auto') r.removeAttribute('data-theme'); else r.setAttribute('data-theme', t);
+  const m = document.querySelector('meta[name="theme-color"]'), def = TEMAS.find(x => x[0] === (t || 'auto'));
+  if (m) m.setAttribute('content', t === 'auto' || !t ? (matchMedia('(prefers-color-scheme: dark)').matches ? '#0e1320' : '#24406f') : def ? def[3] : '#24406f');
+}
+function temaActual() { try { return localStorage.getItem('agenda-tema') || 'auto'; } catch (e) { return 'auto'; } }
+function elegirTema(t) { try { localStorage.setItem('agenda-tema', t); } catch (e) { } aplicarTema(t); renderVista(); toast('Apariencia: ' + TEMAS.find(x => x[0] === t)[1]); }
+aplicarTema(temaActual());
 const HASH0 = location.hash; // se lee antes de que Supabase limpie la dirección
 const CFG = window.APP_CONFIG || {};
 const DEMO = !!(CFG.demo && CFG.demo.activa); // pantalla de bienvenida con botones de prueba
@@ -1917,7 +1933,11 @@ function vistaAjustes() {
 }
 function vistaCuenta() {
   const permiso = 'Notification' in window ? Notification.permission : 'denied';
-  return `<div class="sect">Este dispositivo</div>
+  const tm = temaActual();
+  return `<div class="sect">Apariencia</div>
+  <div class="list"><div class="temas" role="group" aria-label="Apariencia">${TEMAS.map(([k, n, c]) => `<button type="button" class="tema" aria-pressed="${tm === k}" onclick="elegirTema('${k}')"><span class="muestra">${k === 'auto' ? `<i style="background:${c[0]}"></i><i style="background:${c[1]}"></i>` : `<i style="background:${c[0]}"></i><i style="background:${c[1]}"></i>`}</span>${n}</button>`).join('')}</div>
+  <p class="note" style="margin:0 14px 12px">Automático cambia solo entre claro y oscuro según tu móvil u ordenador. La elección se guarda en este dispositivo.</p></div>
+  <div class="sect">Este dispositivo</div>
   <div class="list"><div class="row"><span class="main"><b>${esc(S.user.email)}</b><small>${esRecepcion() ? 'Recepción' : 'Trabajador · ' + esc(yo()?.nombre || '')}</small></span></div>
   <div class="row"><span class="main"><b>Avisos en este dispositivo</b><small>${permiso === 'granted' ? (S.pushActivo ? 'Activados: te llegarán aunque la app esté cerrada o el móvil bloqueado.' : 'Activados con la app abierta. Pulsa «Activar» para recibirlos también con la app cerrada.') : permiso === 'denied' ? 'Bloqueados en los ajustes del navegador o del móvil.' : esIOS() && !instalada() ? 'En iPhone, primero añade la app a la pantalla de inicio.' : 'Desactivados.'}</small></span>${permiso !== 'denied' && !S.pushActivo ? '<button class="pill" onclick="activarNotificaciones()">Activar</button>' : ''}</div>
   ${S.pushActivo ? '<div class="row"><span class="main"><b>Probar avisos</b><small>Te envía un aviso de prueba a ti.</small></span><span style="display:grid;gap:6px"><button class="pill" onclick="avisoPrueba(false)">Al móvil</button><button class="pill" onclick="avisoPrueba(true)">Móvil y correo</button></span></div>' : ''}
