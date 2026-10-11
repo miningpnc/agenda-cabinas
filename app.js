@@ -41,6 +41,9 @@ const trab = id => S.trabajadores.find(t => t.id === id) || { nombre: '—' };
 const cab = id => S.cabinas.find(c => c.id === id) || { nombre: 'Sin cabina' };
 const cli = id => S.clientes.find(c => c.id === id) || { nombre: 'Sin cliente', idioma: 'es' };
 const yo = () => S.trabajadores.find(t => t.id === S.meId);
+const nombreCita = c => { const s = srv(c.servicio_id); return s.precio_libre && c.concepto ? `${s.nombre}: ${c.concepto}` : s.nombre; };
+const precioCita = c => c.precio != null ? +c.precio : (S.precios[c.servicio_id] || 0);
+const hayPrecioLibre = () => S.servicios.some(x => 'precio_libre' in x);
 const paraMi = a => !a.leido_en && (esRecepcion() ? a.para_rol === 'recepcion' : (a.para_rol === 'trabajador' && a.para_trabajador_id === S.meId));
 const misAvisos = () => S.avisos.filter(paraMi).sort((a, b) => b.creado_en.localeCompare(a.creado_en));
 
@@ -139,7 +142,7 @@ function pantallaDemo(aviso = '') {
       </button>
       <button class="role" id="d-trabajador" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5"/></svg>
-        <span><b>Entrar como Trabajador</b><small>Profesional: solo sus citas, sus avisos y, si es autónomo, su propia facturación.</small></span>
+        <span><b>Entrar como Trabajador${(CFG.demo && CFG.demo.trabajador && CFG.demo.trabajador.nombre) ? ' · ' + esc(CFG.demo.trabajador.nombre) : ''}</b><small>Profesional: solo sus citas y los servicios de sus actividades, sus avisos y, si es autónomo, su propia facturación.</small></span>
       </button>
     </div>
     <div class="err" id="d-err" ${aviso ? '' : 'hidden'}>${esc(aviso)}</div>
@@ -322,7 +325,7 @@ async function cargarHistorial() {
 async function cargarClientes() { const r = await sb.from('clientes').select('*').order('nombre'); if (!r.error) S.clientes = r.data; }
 async function cargarDia() {
   const { a, b } = rangoAgenda();
-  const campos = S.vista === 'anio' ? 'id,inicio,fin,estado,trabajador_id,servicio_id,cabina_id,cliente_id' : '*';
+  const campos = S.vista === 'anio' ? 'id,inicio,fin,estado,trabajador_id,servicio_id,cabina_id,cliente_id' + (hayPrecioLibre() ? ',precio,concepto' : '') : '*';
   const [c, ch] = await Promise.all([
     sb.from('citas').select(campos).gte('inicio', a.toISOString()).lt('inicio', b.toISOString()).order('inicio').limit(5000),
     sb.rpc('citas_con_choque', { p_desde: a.toISOString(), p_hasta: b.toISOString() }),
@@ -470,7 +473,7 @@ function bloqueCita(c, OPEN, extra = '', conTrab = false) {
   const cls = [c.estado === 'realizada' ? 'realizada' : '', c.estado === 'no vino' ? 'novino' : '', choque ? 'choque' : ''].join(' ');
   const flags = [choque ? '<span class="flag red">Cabina compartida</span>' : '', nueva ? '<span class="flag new">Nueva</span>' : '', sinConf ? '<span class="flag wait">Sin confirmar</span>' : ''].join(' ');
   return `<button class="appt ${cls}" style="--c:${esc(a.color)};top:${top}px;height:${h}px;${extra}" onclick="event.stopPropagation();abrirCita('${c.id}')">
-    <b>${hhmm(ini)} ${esc(cli(c.cliente_id).nombre)}</b><span>${conTrab ? esc(trab(c.trabajador_id).nombre) + ' · ' : ''}${esc(s.nombre)}</span><span>${esc(cab(c.cabina_id).nombre)}${c.estado !== 'confirmada' ? ' · ' + ESTADOS[c.estado] : ''}</span>${flags}</button>`;
+    <b>${hhmm(ini)} ${esc(cli(c.cliente_id).nombre)}</b><span>${conTrab ? esc(trab(c.trabajador_id).nombre) + ' · ' : ''}${esc(nombreCita(c))}</span><span>${esc(cab(c.cabina_id).nombre)}${c.estado !== 'confirmada' ? ' · ' + ESTADOS[c.estado] : ''}</span>${flags}</button>`;
 }
 function horasGrid(OPEN, CLOSE) { let h = ''; for (let m = OPEN; m < CLOSE; m += 60) h += `<span style="top:${(m - OPEN) / 15 * PX}px">${minToT(m)}</span>`; return h; }
 function lineaAhora(OPEN, CLOSE, left = '48px', width = null) {
@@ -482,7 +485,7 @@ function lineaAhora(OPEN, CLOSE, left = '48px', width = null) {
 function vistaAgenda() {
   const lista = S.vista === 'dia' ? null : citasFiltradas();
   const visibles = S.vista === 'dia' ? S.citas.filter(c => c.estado !== 'cancelada' && columnas().some(t => t.id === c.trabajador_id)) : lista;
-  const prevision = visibles.filter(c => c.estado === 'confirmada').reduce((s, c) => s + (S.precios[c.servicio_id] || 0), 0);
+  const prevision = visibles.filter(c => c.estado === 'confirmada').reduce((s, c) => s + precioCita(c), 0);
   const nChoques = visibles.filter(c => S.choques.has(c.id)).length;
   const cuerpo = { dia: cuerpoDia, semana: cuerpoSemana, mes: cuerpoMes, anio: cuerpoAnio }[S.vista] || cuerpoDia;
   return `
@@ -517,7 +520,7 @@ function cuerpoDia() {
     <div class="ghead"><div></div>${cols.map(t => `<div>${esc(t.nombre)}<small>${esc([...(S.tAct[t.id] || [])].map(id => act(id).nombre).join(', ') || 'Sin actividad')}</small></div>`).join('')}</div>
     <div class="gbody"><div class="times" style="height:${H}px">${horasGrid(OPEN, CLOSE)}</div>${htmlCols}${S.day === dkey(new Date()) ? lineaAhora(OPEN, CLOSE) : ''}</div>
   </div></div>
-  ${canceladas.length ? `<div class="sect">Canceladas este día (${canceladas.length})</div><div class="list">${canceladas.map(c => `<button class="row" onclick="abrirCita('${c.id}')"><span class="main"><b>${hhmm(new Date(c.inicio))} · ${esc(cli(c.cliente_id).nombre)}</b><small>${esc(srv(c.servicio_id).nombre)} · ${esc(trab(c.trabajador_id).nombre)}</small></span></button>`).join('')}</div>` : ''}`;
+  ${canceladas.length ? `<div class="sect">Canceladas este día (${canceladas.length})</div><div class="list">${canceladas.map(c => `<button class="row" onclick="abrirCita('${c.id}')"><span class="main"><b>${hhmm(new Date(c.inicio))} · ${esc(cli(c.cliente_id).nombre)}</b><small>${esc(nombreCita(c))} · ${esc(trab(c.trabajador_id).nombre)}</small></span></button>`).join('')}</div>` : ''}`;
 }
 
 function cuerpoSemana(lista) {
@@ -863,7 +866,7 @@ async function abrirCita(id, idiomaMsg) {
   let cobro = null;
   if (S.puedeFacturar && c.estado === 'realizada') { const r = await sb.from('cobros').select('*').eq('cita_id', c.id).maybeSingle(); cobro = r.data; }
   const lang = idiomaMsg || cl.idioma || 'es';
-  sheet(`<h3>${esc(cl.nombre)}</h3><p class="muted" style="margin:0">${esc(s.nombre)} · ${esc(act(s.actividad_id).nombre)}</p>
+  sheet(`<h3>${esc(cl.nombre)}</h3><p class="muted" style="margin:0">${esc(nombreCita(c))} · ${esc(act(s.actividad_id).nombre)}</p>
     ${S.choques.has(c.id) ? '<div class="box red">Cabina compartida: hay otro tratamiento en esta cabina a la misma hora.</div>' : ''}
     ${mio ? `<div class="box info"><b>Cita ${pend.find(paraMi).tipo === 'nueva' ? 'nueva' : pend.find(paraMi).tipo === 'cancelada' ? 'cancelada' : 'modificada'}.</b> Confirma que la has visto.<div class="actions" style="margin-top:8px"><button class="primary" onclick="recibido('${c.id}')">Recibido</button></div></div>` : ''}
     ${sinConf ? `<div class="box warnb">${esc(trab(c.trabajador_id).nombre)} aún no ha confirmado que ha visto esta cita.</div>` : ''}
@@ -872,7 +875,7 @@ async function abrirCita(id, idiomaMsg) {
       <dt>Con</dt><dd>${esc(trab(c.trabajador_id).nombre)}</dd>
       <dt>Cabina</dt><dd>${esc(cab(c.cabina_id).nombre)}</dd>
       <dt>Teléfono</dt><dd>${esc(cl.telefono || '—')}</dd>
-      ${S.puedeFacturar ? `<dt>Precio</dt><dd>${eur(S.precios[c.servicio_id])}</dd>` : ''}
+      ${S.puedeFacturar || c.precio != null ? `<dt>Precio</dt><dd>${eur(precioCita(c))}</dd>` : ''}
       ${c.notas ? `<dt>Notas</dt><dd>${esc(c.notas)}</dd>` : ''}
       ${esRecepcion() ? `<dt>Historial</dt><dd>${lineaHistorial(c.cliente_id)}</dd>` : ''}
     </dl>
@@ -917,7 +920,7 @@ function recordatorio(c, lang) {
   const fecha = d.toLocaleDateString(LOC[lang] || 'es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
   const h = hhmm(d), n = (cl.nombre || '').split(' ')[0], centro = A.nombre_centro || '', tel = A.telefono || '', dir = A.direccion ? ` (${A.direccion})` : '';
   const T = {
-    es: `Hola ${n}, te recordamos tu cita de ${s.nombre.toLowerCase()} el ${fecha} a las ${h} en ${centro}${dir}. Si no puedes venir, avísanos${tel ? ' al ' + tel : ''}. ¡Gracias!`,
+    es: `Hola ${n}, te recordamos tu cita de ${(s.precio_libre && c.concepto ? c.concepto : s.nombre).toLowerCase()} el ${fecha} a las ${h} en ${centro}${dir}. Si no puedes venir, avísanos${tel ? ' al ' + tel : ''}. ¡Gracias!`,
     en: `Hi ${n}, this is a reminder of your appointment (${s.nombre}) on ${fecha} at ${h} at ${centro}${dir}. If you can't make it, please let us know${tel ? ' on ' + tel : ''}. Thank you!`,
     de: `Hallo ${n}, wir erinnern Sie an Ihren Termin (${s.nombre}) am ${fecha} um ${h} Uhr bei ${centro}${dir}. Falls Sie nicht kommen können, geben Sie uns bitte Bescheid${tel ? ': ' + tel : ''}. Danke!`,
     fr: `Bonjour ${n}, nous vous rappelons votre rendez-vous (${s.nombre}) le ${fecha} à ${h} chez ${centro}${dir}. En cas d'empêchement, merci de nous prévenir${tel ? ' au ' + tel : ''}. Merci !`,
@@ -949,6 +952,8 @@ async function conSolape(run) {
 function traducirError(e) {
   const m = (e && e.message) || '';
   if (m.includes('trabajador_ocupado')) return 'Esa persona ya tiene otra cita a esa hora.';
+  if (m.includes('SERVICIO_NO_PERMITIDO')) { const [, quien, actv] = m.slice(m.indexOf('SERVICIO_NO_PERMITIDO')).split('|'); return `${quien} no tiene asignada la actividad ${actv}. Recepción puede asignársela en Ajustes → Equipo.`; }
+  if (m.includes('FALTA_PRECIO')) return 'Pon el precio del servicio «Otro».';
   if (m.includes('TRABAJADOR_BLOQUEADO')) { const [, quien, motivo, cuando] = m.slice(m.indexOf('TRABAJADOR_BLOQUEADO')).split('|'); return `${quien} tiene ese tiempo bloqueado${motivo ? ' (' + motivo + ')' : ''}: ${cuando}.`; }
   if (m.includes('FUERA_HORARIO')) { const [, tipo, info] = m.slice(m.indexOf('FUERA_HORARIO')).split('|'); return tipo === 'cerrado' ? `El centro está cerrado ese día${info ? ' (' + info + ')' : ''}. Recepción puede abrirlo desde la agenda.` : `La cita se sale del horario de ese día (${info}).`; }
   if (/row-level security/i.test(m)) return 'No tienes permiso para hacer este cambio.';
@@ -969,8 +974,7 @@ function actividadesPermitidas() {
   const activas = S.actividades.filter(a => a.activa);
   if (esRecepcion()) return activas;
   const mias = S.tAct[S.meId] || new Set();
-  const r = activas.filter(a => mias.has(a.id));
-  return r.length ? r : activas;
+  return activas.filter(a => mias.has(a.id));
 }
 function abrirFormulario(cita = null, pre = {}) {
   const editando = !!cita;
@@ -986,7 +990,9 @@ function abrirFormulario(cita = null, pre = {}) {
     hora: cita ? hhmm(new Date(cita.inicio)) : (pre.hora || '10:00'),
     actId, servicioId: cita ? cita.servicio_id : '', trabajadorId: tid, cabinaId: cita ? cita.cabina_id : '',
     cliente: cita && cita.cliente_id ? cli(cita.cliente_id) : (pre.cliente_id ? cli(pre.cliente_id) : null),
-    nuevoNombre: '', notas: cita ? (cita.notas || '') : ''
+    nuevoNombre: '', notas: cita ? (cita.notas || '') : '',
+    precioLibre: cita && cita.precio != null ? +cita.precio : '', concepto: cita ? (cita.concepto || '') : '',
+    durLibre: cita ? Math.round((new Date(cita.fin) - new Date(cita.inicio)) / 60000) : 30
   };
   pintarFormulario();
 }
@@ -1009,25 +1015,32 @@ function pintarFormulario() {
       <div class="field"><label for="f-hora">Hora</label><select id="f-hora">${opcionesHora(F.hora, F.fecha)}</select></div></div>
     <p class="hint ${horarioDe(F.fecha).abierto ? '' : 'bad'}">Horario de ese día: ${esc(textoHorario(F.fecha))}${!horarioDe(F.fecha).abierto && esRecepcion() ? ` · <button type="button" class="linkbtn" onclick="leerForm();abrirHorarioDia('${F.fecha}',true)">Abrir ese día</button>` : ''}</p>
     <div class="field"><label for="f-act">Actividad</label><select id="f-act">${acts.map(a => `<option value="${a.id}" ${a.id === F.actId ? 'selected' : ''}>${esc(a.nombre)}</option>`).join('')}</select></div>
-    <div class="field"><label for="f-srv">Servicio</label><select id="f-srv">${servs.map(x => `<option value="${x.id}" ${x.id === F.servicioId ? 'selected' : ''}>${esc(x.nombre)} · ${x.duracion_min} min${S.puedeFacturar && S.precios[x.id] != null ? ' · ' + eur(S.precios[x.id]) : ''}</option>`).join('') || '<option value="">No hay servicios en esta actividad</option>'}</select></div>
+    ${!acts.length ? `<div class="box warnb">No tienes actividades asignadas, así que no puedes dar citas. Pide a recepción que te las asigne en Ajustes → Equipo.</div>` : ''}
+    <div class="field"><label for="f-srv">Servicio</label><select id="f-srv">${servs.map(x => `<option value="${x.id}" ${x.id === F.servicioId ? 'selected' : ''}>${esc(x.nombre)}${x.precio_libre ? ' · precio libre' : ` · ${x.duracion_min} min${S.puedeFacturar && S.precios[x.id] != null ? ' · ' + eur(S.precios[x.id]) : ''}`}</option>`).join('') || '<option value="">No hay servicios en esta actividad</option>'}</select></div>
+    ${s.precio_libre ? `<div class="box info"><b>Servicio fuera de carta</b>
+      <div class="field"><label for="f-concepto">¿Qué se le hace?</label><input id="f-concepto" value="${esc(F.concepto)}" placeholder="Retirada de esmalte, depilación de labio…"></div>
+      <div class="two"><div class="field"><label for="f-precio">Precio (€)</label><input id="f-precio" type="number" min="0" step="0.5" inputmode="decimal" value="${F.precioLibre}"></div>
+        <div class="field"><label for="f-dur">Duración (min)</label><input id="f-dur" type="number" min="5" step="5" value="${F.durLibre}"></div></div></div>` : ''}
     ${esRecepcion() ? `<div class="field"><label for="f-trab">Trabajador</label><select id="f-trab">${trabs.map(t => `<option value="${t.id}" ${t.id === F.trabajadorId ? 'selected' : ''}>${esc(t.nombre)}</option>`).join('')}</select></div>` : ''}
     <div class="field"><label for="f-cab">Cabina</label><select id="f-cab"><option value="">Sin cabina</option>
       ${cabs.some(c => habituales.has(c.id)) ? `<optgroup label="Habituales">${cabs.filter(c => habituales.has(c.id)).map(c => `<option value="${c.id}" ${c.id === F.cabinaId ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('')}</optgroup>` : ''}
       <optgroup label="${habituales.size ? 'Otras' : 'Cabinas'}">${cabs.filter(c => !habituales.has(c.id)).map(c => `<option value="${c.id}" ${c.id === F.cabinaId ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('')}</optgroup></select></div>
     <div class="field"><span class="flabel">Cliente</span><div id="f-cli-box"></div></div>
     <div class="field"><label for="f-notas">Notas de la cita</label><textarea id="f-notas" rows="2" placeholder="Sin datos clínicos">${esc(F.notas)}</textarea></div>
-    <p class="muted" style="font-size:13px;margin:8px 0 0">Termina a las <b id="f-fin">${calcFin(F.hora, s.duracion_min)}</b> (${s.duracion_min} min).</p>
+    <p class="muted" style="font-size:13px;margin:8px 0 0">Termina a las <b id="f-fin">${calcFin(F.hora, durForm())}</b> (<span id="f-durtxt">${durForm()}</span> min).</p>
     <div class="err" id="f-err"></div>
     <div class="actions"><button class="ghost" onclick="closeSheet()">Cancelar</button><button class="primary" id="f-save" onclick="guardarCita()">Guardar cita</button></div>`);
   pintarCliente();
   const leer = leerForm;
   $('#f-act').onchange = e => { leer(); F.actId = e.target.value; F.servicioId = ''; if (esRecepcion() && !trabajadoresDe(F.actId).some(t => t.id === F.trabajadorId)) { F.trabajadorId = ''; F.cabinaId = ''; } pintarFormulario(); };
-  $('#f-srv').onchange = e => { leer(); F.servicioId = e.target.value; $('#f-fin').textContent = calcFin(F.hora, srv(F.servicioId).duracion_min); };
+  $('#f-srv').onchange = e => { leer(); F.servicioId = e.target.value; pintarFormulario(); };
+  if ($('#f-dur')) $('#f-dur').oninput = () => { leer(); $('#f-fin').textContent = calcFin(F.hora, durForm()); $('#f-durtxt').textContent = durForm(); };
   $('#f-fecha').onchange = () => { leer(); pintarFormulario(); };
-  $('#f-hora').onchange = () => { leer(); $('#f-fin').textContent = calcFin(F.hora, srv(F.servicioId).duracion_min); };
+  $('#f-hora').onchange = () => { leer(); $('#f-fin').textContent = calcFin(F.hora, durForm()); };
   if ($('#f-trab')) $('#f-trab').onchange = e => { leer(); F.trabajadorId = e.target.value; F.cabinaId = cabinaPorDefecto(F.trabajadorId); pintarFormulario(); };
 }
-function leerForm() { if (!$('#f-fecha')) return; F.fecha = $('#f-fecha').value || F.fecha; F.hora = $('#f-hora').value; F.notas = $('#f-notas').value; F.cabinaId = $('#f-cab').value; if ($('#f-srv')) F.servicioId = $('#f-srv').value; if ($('#f-trab')) F.trabajadorId = $('#f-trab').value; }
+function durForm() { const s = srv(F.servicioId); return s.precio_libre ? Math.max(5, parseInt(F.durLibre, 10) || 30) : (s.duracion_min || 30); }
+function leerForm() { if (!$('#f-fecha')) return; if ($('#f-concepto')) { F.concepto = $('#f-concepto').value; F.precioLibre = $('#f-precio').value; F.durLibre = $('#f-dur').value; } F.fecha = $('#f-fecha').value || F.fecha; F.hora = $('#f-hora').value; F.notas = $('#f-notas').value; F.cabinaId = $('#f-cab').value; if ($('#f-srv')) F.servicioId = $('#f-srv').value; if ($('#f-trab')) F.trabajadorId = $('#f-trab').value; }
 function calcFin(h, dur) { return minToT((toMin(h) + (+dur || 30)) % 1440); }
 function pintarCliente() {
   const box = $('#f-cli-box'); if (!box) return;
@@ -1061,7 +1074,14 @@ async function guardarCita() {
   if (!F.fecha || !F.hora) { err.textContent = 'Elige fecha y hora.'; return; }
   if (!F.servicioId) { err.textContent = 'Elige un servicio. Si no hay, créalo en Ajustes.'; return; }
   if (!F.trabajadorId) { err.textContent = 'Elige quién atiende la cita.'; return; }
-  { const m0 = toMin(F.hora), m1 = m0 + (srv(F.servicioId).duracion_min || 30);
+  leerForm();
+  const sl = srv(F.servicioId);
+  if (sl.precio_libre) {
+    if (!F.concepto.trim()) { err.textContent = 'Escribe qué se le hace al cliente.'; return; }
+    if (F.precioLibre === '' || +F.precioLibre < 0) { err.textContent = 'Pon el precio del servicio.'; return; }
+  }
+  if (S.tAct[F.trabajadorId] && !S.tAct[F.trabajadorId].has(sl.actividad_id)) { err.textContent = `${trab(F.trabajadorId).nombre} no tiene asignada la actividad ${act(sl.actividad_id).nombre}.`; return; }
+  { const m0 = toMin(F.hora), m1 = m0 + durForm();
     if (fueraDeHorario(F.fecha, m0, m1)) {
       const h = horarioDe(F.fecha);
       err.innerHTML = esc(!h.abierto ? `Ese día está cerrado${h.motivo ? ' (' + h.motivo + ')' : ''}.` : `La cita se sale del horario de ese día (${h.ap}–${h.ci}).`)
@@ -1082,8 +1102,9 @@ async function guardarCita() {
     S.clientes.push(r.data); S.clientes.sort((a, b) => a.nombre.localeCompare(b.nombre));
     F.cliente = r.data; F.creandoCliente = false; clienteId = r.data.id;
   }
-  const ini = new Date(F.fecha + 'T' + F.hora), dur = srv(F.servicioId).duracion_min || 30;
+  const ini = new Date(F.fecha + 'T' + F.hora), dur = durForm();
   const datos = { inicio: ini.toISOString(), fin: new Date(ini.getTime() + dur * 60000).toISOString(), trabajador_id: F.trabajadorId, cabina_id: F.cabinaId || null, cliente_id: clienteId, servicio_id: F.servicioId, notas: F.notas.trim() || null };
+  if (hayPrecioLibre()) { const libre = srv(F.servicioId).precio_libre; datos.precio = libre ? +F.precioLibre : null; datos.concepto = libre ? F.concepto.trim() : null; }
   const o = F.orig;
   const mismaFranja = o && new Date(o.inicio).getTime() === ini.getTime() && new Date(o.fin).getTime() === new Date(datos.fin).getTime() && (o.cabina_id || null) === datos.cabina_id;
   const r = await conSolape(conf => {
@@ -1145,7 +1166,7 @@ async function abrirCliente(id) {
     <div class="err" id="c-err"></div>
     <div class="actions"><button class="ghost" onclick="closeSheet()">Cerrar</button><button class="primary" onclick="guardarCliente(${id ? `'${id}'` : 'null'})">Guardar</button></div>
     ${id ? `<div class="actions" style="margin-top:8px"><button class="ghost" onclick="closeSheet();abrirFormulario(null,{cliente_id:'${id}'})">Nueva cita para este cliente</button></div>
-    <div class="sect">Historial</div><div class="list">${citas.map(x => `<button class="row" onclick="verCitaAviso('${x.id}')"><span class="main"><b>${esc(srv(x.servicio_id).nombre)}</b><small>${new Date(x.inicio).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: '2-digit' })} ${hhmm(new Date(x.inicio))} · ${esc(trab(x.trabajador_id).nombre)}</small></span><span class="end ${x.estado === 'no vino' ? 'bad' : x.estado === 'cancelada' ? 'warn' : x.estado === 'realizada' ? 'ok' : ''}">${ESTADOS[x.estado]}</span></button>`).join('') || '<p class="row muted">Sin citas todavía.</p>'}</div>` : ''}`);
+    <div class="sect">Historial</div><div class="list">${citas.map(x => `<button class="row" onclick="verCitaAviso('${x.id}')"><span class="main"><b>${esc(nombreCita(x))}</b><small>${new Date(x.inicio).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: '2-digit' })} ${hhmm(new Date(x.inicio))} · ${esc(trab(x.trabajador_id).nombre)}</small></span><span class="end ${x.estado === 'no vino' ? 'bad' : x.estado === 'cancelada' ? 'warn' : x.estado === 'realizada' ? 'ok' : ''}">${ESTADOS[x.estado]}</span></button>`).join('') || '<p class="row muted">Sin citas todavía.</p>'}</div>` : ''}`);
 }
 async function guardarCliente(id) {
   const d = { nombre: $('#c-nombre').value.trim(), telefono: $('#c-tel').value.trim() || null, idioma: $('#c-lang').value, email: $('#c-email').value.trim() || null, notas: $('#c-notas').value.trim() || null };
@@ -1185,10 +1206,10 @@ function vistaFacturacion() {
 }
 async function cargarFacturacion() {
   const { a, b } = rangoPeriodo();
-  const r = await sb.from('citas').select('id,inicio,estado,trabajador_id,servicio_id,cobros(importe,metodo)').gte('inicio', a.toISOString()).lt('inicio', b.toISOString());
+  const r = await sb.from('citas').select('id,inicio,estado,trabajador_id,servicio_id' + (hayPrecioLibre() ? ',precio' : '') + ',cobros(importe,metodo)').gte('inicio', a.toISOString()).lt('inicio', b.toISOString());
   const box = $('#fact'); if (!box) return;
   if (r.error) { box.innerHTML = `<p class="err">${esc(r.error.message)}</p>`; return; }
-  const filas = r.data.map(c => { const cb = Array.isArray(c.cobros) ? c.cobros[0] : c.cobros; return { ...c, importe: cb ? +cb.importe : 0, precio: S.precios[c.servicio_id] || 0 }; });
+  const filas = r.data.map(c => { const cb = Array.isArray(c.cobros) ? c.cobros[0] : c.cobros; return { ...c, importe: cb ? +cb.importe : 0, precio: precioCita(c) }; });
   const sum = (l, f) => l.reduce((s, x) => s + f(x), 0);
   const real = filas.filter(c => c.estado === 'realizada'), pend = filas.filter(c => c.estado === 'confirmada');
   const nov = filas.filter(c => c.estado === 'no vino'), canc = filas.filter(c => c.estado === 'cancelada');
@@ -1232,7 +1253,7 @@ function vistaAjustes() {
   <div class="sect">Actividades y servicios<button class="pill" onclick="editarActividad()">+ Actividad</button></div>
   ${S.actividades.map(a => `<div class="list" style="margin-bottom:10px">
     <button class="row" onclick="editarActividad('${a.id}')"><i style="width:12px;height:12px;border-radius:4px;background:${esc(a.color)}"></i><span class="main"><b>${esc(a.nombre)}${a.activa ? '' : ' <small class="muted">(oculta)</small>'}</b></span><span class="end muted">Editar</span></button>
-    ${S.servicios.filter(s => s.actividad_id === a.id).map(s => `<button class="row" onclick="editarServicio('${s.id}')"><span class="main"><b style="font-weight:500">${esc(s.nombre)}${s.activo ? '' : ' <small class="muted">(oculto)</small>'}</b><small>${s.duracion_min} min</small></span><span class="end"><b>${S.precios[s.id] != null ? eur(S.precios[s.id]) : '—'}</b></span></button>`).join('')}
+    ${S.servicios.filter(s => s.actividad_id === a.id).map(s => `<button class="row" onclick="editarServicio('${s.id}')"><span class="main"><b style="font-weight:500">${esc(s.nombre)}${s.activo ? '' : ' <small class="muted">(oculto)</small>'}</b><small>${s.precio_libre ? 'Duración y precio los pone quien da la cita' : s.duracion_min + ' min'}</small></span><span class="end"><b>${s.precio_libre ? 'Libre' : S.precios[s.id] != null ? eur(S.precios[s.id]) : '—'}</b></span></button>`).join('')}
     <button class="row" onclick="editarServicio(null,'${a.id}')"><span class="main" style="color:var(--accent);font-weight:600">+ Servicio de ${esc(a.nombre.toLowerCase())}</span></button></div>`).join('')}
 
   ${vistaCuenta()}`;
@@ -1338,12 +1359,14 @@ function editarServicio(id, actId) {
     <div class="field"><label for="s-nombre">Nombre</label><input id="s-nombre" value="${esc(s.nombre)}"></div>
     <div class="two"><div class="field"><label for="s-dur">Duración (min)</label><input id="s-dur" type="number" min="5" step="5" value="${s.duracion_min}"></div>
       <div class="field"><label for="s-precio">Precio (€)</label><input id="s-precio" type="number" min="0" step="0.5" inputmode="decimal" value="${id && S.precios[id] != null ? S.precios[id] : ''}"></div></div>
+    ${hayPrecioLibre() ? `<label class="switch"><span><b>Precio libre</b><br><small class="muted">Quien da la cita escribe qué hace, el precio y la duración (como «Otro»).</small></span><input type="checkbox" id="s-libre" ${s.precio_libre ? 'checked' : ''}></label>` : ''}
     <label class="switch"><span><b>Disponible para reservar</b></span><input type="checkbox" id="s-on" ${s.activo ? 'checked' : ''}></label>
     <div class="err" id="s-err"></div>
     <div class="actions"><button class="ghost" onclick="closeSheet()">Cancelar</button><button class="primary" onclick="guardarServicio(${id ? `'${id}'` : 'null'})">Guardar</button></div>`);
 }
 async function guardarServicio(id) {
   const d = { actividad_id: $('#s-act').value, nombre: $('#s-nombre').value.trim(), duracion_min: parseInt($('#s-dur').value, 10) || 0, activo: $('#s-on').checked };
+  if ($('#s-libre')) d.precio_libre = $('#s-libre').checked;
   if (!d.nombre) { $('#s-err').textContent = 'Escribe el nombre.'; return; }
   if (d.duracion_min < 5) { $('#s-err').textContent = 'La duración mínima es de 5 minutos.'; return; }
   const r = id ? await sb.from('servicios').update(d).eq('id', id).select().single() : await sb.from('servicios').insert(d).select().single();
