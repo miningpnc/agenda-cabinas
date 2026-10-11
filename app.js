@@ -1077,7 +1077,7 @@ async function abrirCita(id, idiomaMsg) {
       <dt>Cuándo</dt><dd>${ini.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })} · ${hhmm(ini)}–${hhmm(fin)}</dd>
       <dt>Con</dt><dd>${esc(trab(c.trabajador_id).nombre)}</dd>
       <dt>Cabina</dt><dd>${esc(cab(c.cabina_id).nombre)}</dd>
-      <dt>Teléfono</dt><dd>${esc(verTel(cl.telefono, cl.pais_telefono) || '—')}</dd>${cl.fecha_nacimiento ? `<dt>Edad</dt><dd>${edad(cl.fecha_nacimiento)} años</dd>` : ''}${cl.salud ? `<dt>Anotaciones</dt><dd class="warn"><b>${esc(cl.salud)}</b></dd>` : ''}
+      <dt>Teléfono</dt><dd>${esc(verTel(cl.telefono, cl.pais_telefono) || '—')}</dd>${cl.fecha_nacimiento ? `<dt>Edad</dt><dd>${edad(cl.fecha_nacimiento)} años</dd>` : ''}${(cl.zonas_dolor || []).length ? `<dt>Molestias</dt><dd><div class="mapa mini">${mapaCuerpo(cl.zonas_dolor, false, 'mc-cita').replace(/<div class="zchips"[\s\S]*$/, '')}</div><b class="warn">${esc(textoZonas(cl.zonas_dolor))}</b></dd>` : ''}${cl.salud ? `<dt>Anotaciones</dt><dd class="warn"><b>${esc(cl.salud)}</b></dd>` : ''}
       ${S.puedeFacturar || c.precio != null ? `<dt>Precio</dt><dd>${eur(precioCita(c))}</dd>` : ''}
       ${c.notas ? `<dt>Notas</dt><dd>${esc(c.notas)}</dd>` : ''}
       ${esRecepcion() ? `<dt>Historial</dt><dd>${lineaHistorial(c.cliente_id)}</dd>` : ''}
@@ -1256,7 +1256,7 @@ function calcFin(h, dur) { return minToT((toMin(h) + (+dur || 30)) % 1440); }
 function pintarCliente() {
   const box = $('#f-cli-box'); if (!box) return;
   if (F.cliente) {
-    box.innerHTML = `<div class="picked"><span class="avatar">${esc(iniciales(F.cliente.nombre))}</span><span class="grow" style="min-width:0"><b>${esc(F.cliente.nombre)}</b><br><small>${esc(detalleCliente(F.cliente))}</small>${lineaHistorial(F.cliente.id) ? '<br><small>' + lineaHistorial(F.cliente.id) + '</small>' : ''}${F.cliente.salud ? `<br><small class="warn"><b>Anotaciones:</b> ${esc(F.cliente.salud)}</small>` : ''}</span><button class="pill" type="button" onclick="F.cliente=null;pintarCliente()">Cambiar</button></div>`;
+    box.innerHTML = `<div class="picked"><span class="avatar">${esc(iniciales(F.cliente.nombre))}</span><span class="grow" style="min-width:0"><b>${esc(F.cliente.nombre)}</b><br><small>${esc(detalleCliente(F.cliente))}</small>${lineaHistorial(F.cliente.id) ? '<br><small>' + lineaHistorial(F.cliente.id) + '</small>' : ''}${(F.cliente.zonas_dolor || []).length ? `<br><small class="warn"><b>Molestias:</b> ${esc(textoZonas(F.cliente.zonas_dolor))}</small>` : ''}${F.cliente.salud ? `<br><small class="warn"><b>Anotaciones:</b> ${esc(F.cliente.salud)}</small>` : ''}</span><button class="pill" type="button" onclick="F.cliente=null;pintarCliente()">Cambiar</button></div>`;
     return;
   }
   if (F.creandoCliente) {
@@ -1422,6 +1422,7 @@ function leerTel(id) {
 }
 const hayFicha = () => S.clientes.some(c => 'nombre_pila' in c);
 const hayDoc = () => S.clientes.some(c => 'numero_documento' in c);
+const hayMapa = () => S.clientes.some(c => 'zonas_dolor' in c);
 const nombrePais = code => code === 'OT' ? 'Otra' : (PAISES.find(p => p[0] === code) || [])[1] || '';
 const sinAcentos = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '');
 const normNombre = s => sinAcentos(s).toLowerCase().replace(/\s+/g, ' ').trim();
@@ -1472,6 +1473,78 @@ function irALetra(l) {
   window.scrollTo({ top: y, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
 }
 
+
+
+/* ================= mapa corporal (zonas de dolor) ================= */
+// Coordenadas en un lienzo de 120×270. En la vista de frente, la derecha del cliente queda a la izquierda del dibujo.
+const ZONAS = {
+  cabeza: 'Cabeza', cara: 'Cara', cuello: 'Cuello', cervicales: 'Cervicales',
+  'hombro-d': 'Hombro derecho', 'hombro-i': 'Hombro izquierdo', pecho: 'Pecho', abdomen: 'Abdomen',
+  'omoplato-d': 'Omóplato derecho', 'omoplato-i': 'Omóplato izquierdo', dorsales: 'Espalda alta (dorsales)', lumbares: 'Lumbares',
+  'brazo-d': 'Brazo derecho', 'brazo-i': 'Brazo izquierdo', 'codo-d': 'Codo derecho', 'codo-i': 'Codo izquierdo',
+  'antebrazo-d': 'Antebrazo derecho', 'antebrazo-i': 'Antebrazo izquierdo', 'muneca-d': 'Muñeca derecha', 'muneca-i': 'Muñeca izquierda',
+  'mano-d': 'Mano derecha', 'mano-i': 'Mano izquierda', 'cadera-d': 'Cadera derecha', 'cadera-i': 'Cadera izquierda',
+  'gluteo-d': 'Glúteo derecho', 'gluteo-i': 'Glúteo izquierdo', 'muslo-d': 'Muslo derecho', 'muslo-i': 'Muslo izquierdo',
+  'isquio-d': 'Isquiotibiales derecho', 'isquio-i': 'Isquiotibiales izquierdo', 'rodilla-d': 'Rodilla derecha', 'rodilla-i': 'Rodilla izquierda',
+  'corva-d': 'Corva derecha', 'corva-i': 'Corva izquierda', 'espinilla-d': 'Espinilla derecha', 'espinilla-i': 'Espinilla izquierda',
+  'gemelo-d': 'Gemelo derecho', 'gemelo-i': 'Gemelo izquierdo', 'tobillo-d': 'Tobillo derecho', 'tobillo-i': 'Tobillo izquierdo',
+  'pie-d': 'Pie derecho', 'pie-i': 'Pie izquierdo', 'talon-d': 'Talón derecho', 'talon-i': 'Talón izquierdo'
+};
+// [id, forma, ...medidas]; los lados se reflejan: «a» es el lado izquierdo del dibujo
+function figuraCuerpo(vista, sel = new Set()) {
+  const fr = vista === 'frente';
+  const a = fr ? 'd' : 'i', b = fr ? 'i' : 'd'; // lado del dibujo → lado del cliente
+  const piezas = [
+    ['cabeza', 'e', 60, 20, 13, 15], [fr ? 'cara' : 'cabeza', 'e', 60, 24, 9, 9],
+    [fr ? 'cuello' : 'cervicales', 'r', 53, 35, 14, 10, 4],
+    [`hombro-${a}`, 'e', 39, 52, 10, 8], [`hombro-${b}`, 'e', 81, 52, 10, 8],
+    ...(fr ? [['pecho', 'r', 44, 47, 32, 30, 8], ['abdomen', 'r', 45, 78, 30, 30, 7]]
+           : [[`omoplato-${a}`, 'r', 44, 47, 15, 22, 6], [`omoplato-${b}`, 'r', 61, 47, 15, 22, 6], ['dorsales', 'r', 46, 70, 28, 14, 5], ['lumbares', 'r', 45, 85, 30, 23, 6]]),
+    [`brazo-${a}`, 'r', 25, 57, 12, 32, 6], [`brazo-${b}`, 'r', 83, 57, 12, 32, 6],
+    [`codo-${a}`, 'e', 30, 94, 7, 6], [`codo-${b}`, 'e', 90, 94, 7, 6],
+    [`antebrazo-${a}`, 'r', 23, 100, 12, 28, 6], [`antebrazo-${b}`, 'r', 85, 100, 12, 28, 6],
+    [`muneca-${a}`, 'r', 22, 128, 12, 8, 3], [`muneca-${b}`, 'r', 86, 128, 12, 8, 3],
+    [`mano-${a}`, 'e', 27, 144, 8, 10], [`mano-${b}`, 'e', 93, 144, 8, 10],
+    ...(fr ? [[`cadera-${a}`, 'r', 43, 108, 17, 18, 6], [`cadera-${b}`, 'r', 60, 108, 17, 18, 6]]
+           : [[`gluteo-${a}`, 'r', 43, 108, 17, 20, 8], [`gluteo-${b}`, 'r', 60, 108, 17, 20, 8]]),
+    ...(fr ? [[`muslo-${a}`, 'r', 44, 127, 15, 44, 7], [`muslo-${b}`, 'r', 61, 127, 15, 44, 7]]
+           : [[`isquio-${a}`, 'r', 44, 129, 15, 42, 7], [`isquio-${b}`, 'r', 61, 129, 15, 42, 7]]),
+    ...(fr ? [[`rodilla-${a}`, 'e', 51.5, 177, 8, 7], [`rodilla-${b}`, 'e', 68.5, 177, 8, 7]]
+           : [[`corva-${a}`, 'e', 51.5, 177, 8, 7], [`corva-${b}`, 'e', 68.5, 177, 8, 7]]),
+    ...(fr ? [[`espinilla-${a}`, 'r', 45, 185, 13, 40, 6], [`espinilla-${b}`, 'r', 62, 185, 13, 40, 6]]
+           : [[`gemelo-${a}`, 'r', 45, 185, 13, 40, 6], [`gemelo-${b}`, 'r', 62, 185, 13, 40, 6]]),
+    [`tobillo-${a}`, 'r', 45, 226, 13, 8, 3], [`tobillo-${b}`, 'r', 62, 226, 13, 8, 3],
+    ...(fr ? [[`pie-${a}`, 'e', 50, 242, 9, 7], [`pie-${b}`, 'e', 70, 242, 9, 7]]
+           : [[`talon-${a}`, 'e', 51, 240, 7, 6], [`talon-${b}`, 'e', 69, 240, 7, 6]])
+  ];
+  return piezas.map(([id, f, x, y, w, h, r]) => {
+    const t = `<title>${ZONAS[id]}</title>`;
+    return f === 'e'
+      ? `<ellipse class="zona${sel.has(id) ? ' sel' : ''}" data-z="${id}" cx="${x}" cy="${y}" rx="${w}" ry="${h}">${t}</ellipse>`
+      : `<rect class="zona${sel.has(id) ? ' sel' : ''}" data-z="${id}" x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}">${t}</rect>`;
+  }).join('');
+}
+function mapaCuerpo(sel = [], editable = false, id = 'mc') {
+  const s = new Set(sel);
+  const svg = vista => `<figure><svg viewBox="0 0 120 252" role="img" aria-label="Cuerpo visto de ${vista === 'frente' ? 'frente' : 'espaldas'}">${figuraCuerpo(vista, s)}</svg><figcaption>${vista === 'frente' ? 'Delante' : 'Detrás'}<small>${vista === 'frente' ? 'su derecha a la izquierda' : 'su derecha a la derecha'}</small></figcaption></figure>`;
+  return `<div class="mapa ${editable ? 'editable' : ''}" id="${id}">${svg('frente')}${svg('espalda')}</div>
+    <div class="zchips" id="${id}-chips">${[...s].map(z => `<span class="zchip">${esc(ZONAS[z] || z)}${editable ? ` <button type="button" aria-label="Quitar ${esc(ZONAS[z] || z)}" data-q="${z}">×</button>` : ''}</span>`).join('') || (editable ? '<small class="muted">Toca en el dibujo las zonas donde tiene molestias.</small>' : '')}</div>`;
+}
+function pintarSeleccionMapa(id, s) {
+  document.querySelectorAll(`#${id} .zona`).forEach(z => z.classList.toggle('sel', s.has(z.dataset.z)));
+}
+function activarMapa(id, sel) {
+  const s = new Set(sel); window._zonas = s;
+  const repintar = () => {
+    pintarSeleccionMapa(id, s);
+    const ch = $(`#${id}-chips`);
+    ch.innerHTML = [...s].map(z => `<span class="zchip">${esc(ZONAS[z] || z)} <button type="button" aria-label="Quitar ${esc(ZONAS[z] || z)}" data-q="${z}">×</button></span>`).join('') || '<small class="muted">Toca en el dibujo las zonas donde tiene molestias.</small>';
+    ch.querySelectorAll('[data-q]').forEach(bq => bq.onclick = () => { s.delete(bq.dataset.q); repintar(); });
+  };
+  document.querySelectorAll(`#${id} .zona`).forEach(z => z.addEventListener('click', () => { const k = z.dataset.z; s.has(k) ? s.delete(k) : s.add(k); repintar(); }));
+  repintar();
+}
+const textoZonas = zs => (zs || []).map(z => ZONAS[z] || z).join(', ');
 
 /* ================= consentimiento de protección de datos ================= */
 const hayConsent = () => 'cif' in (S.ajustes || {});
@@ -1643,6 +1716,7 @@ async function abrirCliente(id) {
     <div class="actions"><button class="ghost" onclick="closeSheet()">Cerrar</button>${puedeEditar ? `<button class="primary" onclick="guardarCliente(${id ? `'${id}'` : 'null'})">Guardar</button>` : ''}</div>
     ${id ? `<div class="actions" style="margin-top:8px"><button class="ghost" onclick="closeSheet();abrirFormulario(null,{cliente_id:'${id}'})">Nueva cita para este cliente</button></div>
     <div class="sect">Historial</div><div class="list">${citas.map(x => `<button class="row" onclick="verCitaAviso('${x.id}')"><span class="main"><b>${esc(nombreCita(x))}</b><small>${new Date(x.inicio).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: '2-digit' })} ${hhmm(new Date(x.inicio))} · ${esc(trab(x.trabajador_id).nombre)}</small></span><span class="end ${x.estado === 'no vino' ? 'bad' : x.estado === 'cancelada' ? 'warn' : x.estado === 'realizada' ? 'ok' : ''}">${ESTADOS[x.estado]}</span></button>`).join('') || '<p class="row muted">Sin citas todavía.</p>'}</div>` : ''}`);
+  if ($('#mc-ficha')) activarMapa('mc-ficha', c.zonas_dolor || []);
 }
 function formCliente(c) {
   const ficha = hayFicha();
@@ -1662,20 +1736,26 @@ function formCliente(c) {
     ${ficha ? `<div class="field"><label for="c-dir">Dirección</label><input id="c-dir" value="${esc(c.direccion || '')}" placeholder="Calle, número, población"></div>
     <div class="salud">
       ${hayConsent() ? `<button type="button" class="primary ancho" onclick="${c.id ? `guardarCliente('${c.id}','consent')` : `guardarCliente(null,'consent')`}">Consentimiento de datos: imprimir o firmar</button>
-        <p class="cons-txt ${c.consentimiento_salud ? 'ok' : c.consentimiento_rechazado_en ? 'bad' : 'warn'}"><input type="checkbox" id="c-cons" ${c.consentimiento_salud ? 'checked' : ''} disabled aria-label="Consentimiento firmado"><span>${c.consentimiento_salud ? `<b>Firmado</b> el ${fechaCorta(c.consentimiento_salud_en)}. Ya se pueden escribir anotaciones.` : c.consentimiento_rechazado_en ? `<b>No quiso firmar</b> (${fechaCorta(c.consentimiento_rechazado_en)}). Se le atiende igual, sin anotaciones de salud.` : `<b>Pendiente de firma.</b> ${c.id ? 'Pulsa el botón para imprimir la hoja o firmarla en pantalla.' : 'El botón guarda la ficha y prepara la hoja con estos datos.'}`}</span></p>`
+        <p class="cons-txt ${c.consentimiento_salud ? 'ok' : c.consentimiento_rechazado_en ? 'bad' : 'warn'}"><input type="checkbox" id="c-cons" ${c.consentimiento_salud ? 'checked' : ''} disabled aria-label="Consentimiento firmado"><span>${c.consentimiento_salud ? `<b>Firmado</b>${c.consentimiento_salud_en ? ' el ' + fechaCorta(c.consentimiento_salud_en) : ''}. Ya se pueden escribir anotaciones.` : c.consentimiento_rechazado_en ? `<b>No quiso firmar</b> (${fechaCorta(c.consentimiento_rechazado_en)}). Se le atiende igual, sin anotaciones de salud.` : `<b>Pendiente de firma.</b> ${c.id ? 'Pulsa el botón para imprimir la hoja o firmarla en pantalla.' : 'El botón guarda la ficha y prepara la hoja con estos datos.'}`}</span></p>`
       : `<label class="chk"><input type="checkbox" id="c-cons" ${c.consentimiento_salud ? 'checked' : ''} onchange="$('#c-salud').disabled=!this.checked"> <span><b>El cliente da su consentimiento</b> para guardar anotaciones sobre su salud o molestias</span></label>`}
+      ${hayMapa() ? `<div class="field"><span class="flabel">Zonas con molestias</span>${c.consentimiento_salud ? mapaCuerpo(c.zonas_dolor || [], true, 'mc-ficha') : `<div class="mapa-bloq">${mapaCuerpo(c.zonas_dolor || [], false, 'mc-bloq')}<p>Disponible cuando el cliente firme el consentimiento</p></div>`}</div>` : ''}
       <div class="field"><label for="c-salud">Anotaciones del cliente</label><textarea id="c-salud" rows="3" ${c.consentimiento_salud ? '' : 'disabled'} placeholder="Ej.: tiene problemas de espalda · deportista, juega al tenis y se queja del brazo">${esc(c.salud || '')}</textarea>
       <small class="muted">Solo lo ven recepción y quien atiende a este cliente.</small></div></div>` : ''}
     <div class="field"><label for="c-notas">Notas y preferencias</label><textarea id="c-notas" rows="2" placeholder="Prefiere tardes, presión suave…">${esc(c.notas || '')}</textarea></div>`;
 }
 function datosFormCliente(orig = {}) {
-  const tl = leerTel('c-tel'); if (tl.error) return { error: tl.error };
+  let tl = leerTel('c-tel');
+  if (tl.error) { // un teléfono antiguo que no se ha tocado no impide guardar el resto
+    const o = partirTel(orig.telefono, orig.pais_telefono);
+    if (orig.telefono && o.num === $('#c-tel-num').value.replace(/\D/g, '')) tl = { telefono: orig.telefono, pais_telefono: orig.pais_telefono };
+    else return { error: tl.error };
+  }
   if (!hayFicha()) { const nombre = $('#c-nombre').value.trim(); if (!nombre) return { error: 'Escribe el nombre.' }; return { d: { nombre, telefono: tl.telefono, idioma: $('#c-lang').value, email: $('#c-email').value.trim() || null, notas: $('#c-notas').value.trim() || null } }; }
   const pila = capitalizar($('#c-nombre').value), apell = capitalizar($('#c-apellidos').value);
   if (!pila) return { error: 'Escribe el nombre.' };
   if (!apell) return { error: 'Escribe al menos un apellido: ayuda a distinguir clientes con el mismo nombre.' };
   const cons = $('#c-cons').checked, salud = $('#c-salud').value.trim();
-  const consCampos = hayConsent() ? { salud: orig.consentimiento_salud ? (salud || null) : null }
+  const consCampos = hayConsent() ? { salud: orig.consentimiento_salud ? (salud || null) : null, ...(hayMapa() ? { zonas_dolor: orig.consentimiento_salud && window._zonas ? [...window._zonas] : (orig.zonas_dolor || []) } : {}) }
     : { consentimiento_salud: cons, salud: cons ? (salud || null) : null, consentimiento_salud_en: cons ? (orig.consentimiento_salud_en || new Date().toISOString()) : null };
   return { d: {
     nombre: pila + ' ' + apell, nombre_pila: pila, apellidos: apell,

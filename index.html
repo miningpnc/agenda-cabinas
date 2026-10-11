@@ -327,6 +327,25 @@ select.pill{padding:6px 10px}
 .cons-txt.ok{color:var(--ok)}.cons-txt.warn{color:var(--warn)}.cons-txt.bad{color:var(--bad)}
 .cons-txt b{color:inherit}
 .hoja .pie{margin-top:16px;border-top:1px solid #ccc;padding-top:6px;font-size:10.5px}
+/* mapa corporal */
+.mapa{display:grid;grid-template-columns:1fr 1fr;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 8px 6px}
+.mapa figure{margin:0;text-align:center}
+.mapa svg{width:100%;max-width:170px;height:auto;display:block;margin:0 auto}
+.mapa figcaption{font-size:12.5px;font-weight:700;color:var(--ink);margin-top:2px}
+.mapa figcaption small{display:block;font-weight:400;font-size:10.5px;color:var(--muted)}
+.zona{fill:var(--sunken);stroke:color-mix(in srgb,var(--muted) 55%,var(--line));stroke-width:.8;transition:fill .12s}
+.mapa.editable .zona{cursor:pointer}
+.mapa.editable .zona:hover{fill:var(--accent-soft)}
+.zona.sel,.mapa.editable .zona.sel:hover{fill:color-mix(in srgb,var(--bad) 70%,var(--surface));stroke:var(--bad)}
+.zchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.zchip{display:inline-flex;align-items:center;gap:4px;font-size:12.5px;font-weight:600;border-radius:99px;padding:3px 6px 3px 10px;background:var(--bad-soft);color:var(--bad)}
+.zchip button{border:0;background:none;color:inherit;font-size:15px;line-height:1;padding:0 4px;cursor:pointer}
+.mapa-bloq{position:relative}
+.mapa-bloq .mapa{opacity:.35;pointer-events:none}
+.mapa-bloq p{position:absolute;inset:0;display:grid;place-items:center;margin:0;text-align:center;font-weight:700;font-size:13px;color:var(--warn);padding:16px}
+.mapa.mini{display:inline-grid;grid-template-columns:76px 76px;gap:6px;padding:6px 6px 2px;margin-bottom:4px}
+.mapa.mini figcaption{font-size:10.5px;white-space:nowrap}
+.mapa.mini figcaption small{display:none}
 </style>
 </head>
 <body>
