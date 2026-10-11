@@ -1093,7 +1093,7 @@ async function abrirCita(id, idiomaMsg) {
       <dt>Cuándo</dt><dd>${ini.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })} · ${hhmm(ini)}–${hhmm(fin)}</dd>
       <dt>Con</dt><dd>${esc(trab(c.trabajador_id).nombre)}</dd>
       <dt>Cabina</dt><dd>${esc(cab(c.cabina_id).nombre)}</dd>
-      <dt>Teléfono</dt><dd>${esc(verTel(cl.telefono, cl.pais_telefono) || '—')}</dd>${cl.fecha_nacimiento ? `<dt>Edad</dt><dd>${edad(cl.fecha_nacimiento)} años</dd>` : ''}${(cl.zonas_dolor || []).length ? `<dt>Molestias</dt><dd><div class="mapa mini">${mapaCuerpo(cl.zonas_dolor, false, 'mc-cita').replace(/<div class="zchips"[\s\S]*$/, '')}</div><b class="warn">${esc(textoZonas(cl.zonas_dolor))}</b></dd>` : ''}${cl.salud ? `<dt>Anotaciones</dt><dd class="warn"><b>${esc(cl.salud)}</b></dd>` : ''}
+      <dt>Teléfono</dt><dd>${esc(verTel(cl.telefono, cl.pais_telefono) || '—')}</dd>${cl.fecha_nacimiento ? `<dt>Edad</dt><dd>${edad(cl.fecha_nacimiento)} años</dd>` : ''}${(cl.zonas_dolor || []).length ? `<dt>Molestias</dt><dd>${mapaCuerpo(cl.zonas_dolor, false, 'mc-cita').replace(/<div class="zchips"[\s\S]*$/, '').replace('class="mapa ', 'class="mapa mini ')}<b class="warn" style="display:block">${esc(textoZonas(cl.zonas_dolor))}</b></dd>` : ''}${cl.salud ? `<dt>Anotaciones</dt><dd class="warn"><b>${esc(cl.salud)}</b></dd>` : ''}
       ${S.puedeFacturar || c.precio != null ? `<dt>Precio</dt><dd>${eur(precioCita(c))}</dd>` : ''}
       ${c.notas ? `<dt>Notas</dt><dd>${esc(c.notas)}</dd>` : ''}
       ${esRecepcion() ? `<dt>Historial</dt><dd>${lineaHistorial(c.cliente_id)}</dd>` : ''}
@@ -1618,6 +1618,16 @@ function hojaConsentimiento(c, op = {}) {
   <p class="nota pie">Firmar este documento es voluntario. Si no desea firmarlo, se le atenderá igualmente, pero no se guardarán anotaciones sobre su salud ni recibirá recordatorios de sus citas.</p>
 </article>`;
 }
+// Las hojas guardadas se muestran como HTML: se limpian antes por si alguien metiera código
+function limpiarHoja(html) {
+  const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
+  doc.querySelectorAll('script,iframe,object,embed,link,meta,base,form,input,button,textarea,select').forEach(n => n.remove());
+  doc.querySelectorAll('*').forEach(n => [...n.attributes].forEach(a => {
+    const v = a.value.trim().toLowerCase();
+    if (/^on/i.test(a.name) || ((a.name === 'href' || a.name === 'src' || a.name === 'xlink:href') && !(v.startsWith('data:image/') || v.startsWith('#') || v.startsWith('https:')))) n.removeAttribute(a.name);
+  }));
+  return doc.body.innerHTML;
+}
 function imprimirHoja(html) {
   let d = document.getElementById('imprimir');
   if (!d) { d = document.createElement('div'); d.id = 'imprimir'; document.body.appendChild(d); }
@@ -1644,9 +1654,9 @@ async function verConsentimiento(cid) {
   const r = await sb.from('consentimientos').select('*').eq('id', cid).maybeSingle();
   if (!r.data) { toast('No se encontró la hoja'); return; }
   const h = r.data;
-  sheet(`<div class="hoja-pantalla">${h.texto}</div>
+  sheet(`<div class="hoja-pantalla">${limpiarHoja(h.texto)}</div>
     <div class="actions"><button class="ghost" onclick="abrirConsentimiento('${h.cliente_id}')">Volver</button><button class="primary" id="cs-print">Imprimir</button></div>`);
-  $('#cs-print').onclick = () => imprimirHoja(h.texto);
+  $('#cs-print').onclick = () => imprimirHoja(limpiarHoja(h.texto));
 }
 function pantallaFirma(id) {
   const c = cli(id);
