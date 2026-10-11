@@ -6,7 +6,7 @@
 const TEMAS = [
   ['auto', 'Automático', ['#f2f4f8', '#0e1320'], '#24406f'], ['claro', 'Claro', ['#f2f4f8', '#ffffff'], '#24406f'],
   ['oscuro', 'Oscuro', ['#0e1320', '#161e30'], '#0e1320'], ['verde', 'Verde pastel', ['#eef6f0', '#3f7d5c'], '#3f7d5c'],
-  ['azul', 'Azul pastel', ['#edf4fb', '#3a6ea5'], '#3a6ea5'], ['pergamino', 'Pergamino', ['#f3ead8', '#8a5a2b'], '#8a5a2b'],
+  ['azul', 'Azul pastel', ['#edf4fb', '#3a6ea5'], '#3a6ea5'], ['rosa', 'Rosa pastel', ['#fbf0f3', '#b4507a'], '#b4507a'], ['pergamino', 'Pergamino', ['#f3ead8', '#8a5a2b'], '#8a5a2b'],
   ['minimal', 'Minimalista', ['#ffffff', '#111111'], '#111111']
 ];
 function aplicarTema(t) {
