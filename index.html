@@ -451,6 +451,34 @@ table.imp select{font-size:12px;padding:4px;max-width:160px}
 .informe .stats{grid-template-columns:repeat(5,1fr)}
 .informe .dos-col{grid-template-columns:1fr 1fr}
 .informe .mapa-calor i small{display:block}
+
+/* ---------- fotos y ficha flotante ---------- */
+.ava-foto{border-radius:50%;object-fit:cover;flex:none;display:inline-block;vertical-align:middle;background:var(--sunken)}
+.ghead .ava-foto{display:block;margin:0 auto 4px}
+.ghead div{text-align:center}
+.appt .ava-foto{margin-right:4px;border:1px solid var(--surface)}
+.mline .ava-foto{margin-right:3px}
+.con-foto{display:flex;align-items:center;gap:8px}
+.foto-fila{display:flex;align-items:center;gap:12px;margin-top:10px}
+.fotos-sw[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.selfie{display:grid;place-items:center;margin:14px 0 4px}
+.selfie video,.sf-ver img{width:220px;height:220px;border-radius:50%;object-fit:cover;background:var(--sunken)}
+.selfie video{transform:scaleX(-1)}
+.sf-ver{display:grid;place-items:center}
+.sf-botones{justify-content:center;flex-wrap:wrap}
+label.boton{display:inline-flex;align-items:center;cursor:pointer}
+.ficha-flotante{position:fixed;z-index:250;width:270px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-left:5px solid var(--c);border-radius:12px;padding:10px 12px;box-shadow:0 10px 30px rgb(0 0 0/.18);pointer-events:none;font-size:13px;line-height:1.35}
+.ff-hora{font-size:12px;color:var(--muted);font-weight:600;font-variant-numeric:tabular-nums}
+.ff-cli{display:inline-block;font-size:15px;margin-top:2px}
+.ff-srv{margin-top:2px}
+.ff-fila{display:flex;align-items:center;gap:8px;margin-top:8px}
+.ff-fila .avatar{width:26px;height:26px}
+.ff-pie{display:flex;justify-content:space-between;align-items:center;margin-top:8px}
+.ff-estado{font-size:11.5px;font-weight:700;border-radius:99px;padding:2px 8px;background:var(--sunken)}
+.ff-estado.e-realizada{color:var(--ok)} .ff-estado.e-novino{color:var(--bad)} .ff-estado.e-cancelada{color:var(--warn)}
+.ff-flags{margin-top:6px;display:flex;flex-wrap:wrap;gap:4px}
+.ff-flags .flag{margin:0;border-radius:5px;padding:1px 6px}
+.ff-notas{margin-top:6px;padding-top:6px;border-top:1px solid var(--line);color:var(--muted);white-space:pre-wrap}
 </style>
 </head>
 <body>

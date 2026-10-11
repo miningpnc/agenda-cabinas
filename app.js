@@ -367,6 +367,7 @@ async function iniciarApp() {
   suscribir();
   suscribirPush(true).then(ok => { if (ok && (S.tab === 'cuenta' || S.tab === 'ajustes')) renderVista(); });
   render();
+  setTimeout(ofrecerFoto, 800);
 }
 
 /* ================= datos ================= */
@@ -709,8 +710,8 @@ function bloqueCita(c, OPEN, extra = '', conTrab = false) {
   const choque = S.choques.has(c.id);
   const cls = [c.estado === 'realizada' ? 'realizada' : '', c.estado === 'no vino' ? 'novino' : '', choque ? 'choque' : ''].join(' ');
   const flags = [choque ? '<span class="flag red">Cabina compartida</span>' : '', nueva ? '<span class="flag new">Nueva</span>' : '', sinConf ? '<span class="flag wait">Sin confirmar</span>' : ''].join(' ');
-  return `<button class="appt ${cls}" style="--c:${esc(a.color)};top:${top}px;height:${h}px;${extra}" onclick="event.stopPropagation();abrirCita('${c.id}')">
-    <b>${hhmm(ini)} ${esc(cli(c.cliente_id).nombre)}</b><span>${conTrab ? esc(trab(c.trabajador_id).nombre) + ' · ' : ''}${esc(nombreCita(c))}</span><span>${esc(cab(c.cabina_id).nombre)}${c.estado !== 'confirmada' ? ' · ' + ESTADOS[c.estado] : ''}</span>${flags}</button>`;
+  return `<button class="appt ${cls}" data-cita="${c.id}" style="--c:${esc(a.color)};top:${top}px;height:${h}px;${extra}" onclick="event.stopPropagation();abrirCita('${c.id}')">
+    <b>${conTrab ? avatarTrab(trab(c.trabajador_id), 16) : ''}${hhmm(ini)} ${esc(cli(c.cliente_id).nombre)}</b><span>${conTrab ? esc(trab(c.trabajador_id).nombre) + ' · ' : ''}${esc(nombreCita(c))}</span><span>${esc(cab(c.cabina_id).nombre)}${c.estado !== 'confirmada' ? ' · ' + ESTADOS[c.estado] : ''}</span>${flags}</button>`;
 }
 function horasGrid(OPEN, CLOSE) { let h = ''; for (let m = OPEN; m < CLOSE; m += 60) h += `<span style="top:${(m - OPEN) / 15 * PX}px">${minToT(m)}</span>`; return h; }
 function lineaAhora(OPEN, CLOSE, left = '48px', width = null) {
@@ -736,6 +737,7 @@ function vistaAgenda() {
     <button class="pill" onclick="irHoy()">Hoy</button>
     <input type="date" id="pick-day" class="pill" value="${S.day}" onchange="if(this.value){S.day=this.value;recargarDia()}" aria-label="Elegir fecha">
     ${esRecepcion() && S.vista !== 'dia' ? `<select id="f-trab-filtro" class="pill" onchange="S.filtroTrab=this.value;renderVista()" aria-label="Filtrar por trabajador"><option value="">Todo el equipo</option>${S.trabajadores.filter(t => t.activo).map(t => `<option value="${t.id}" ${S.filtroTrab === t.id ? 'selected' : ''}>${esc(t.nombre)}</option>`).join('')}</select>` : ''}
+    ${S.trabajadores.some(t => t.foto) ? `<button class="pill fotos-sw" aria-pressed="${verFotos()}" onclick="alternarFotos()" title="Ver u ocultar las fotos del equipo">${verFotos() ? 'Fotos: sí' : 'Fotos: no'}</button>` : ''}
     <span class="grow"></span>
     <button class="ghost" onclick="nuevoBloqueo()">Bloquear horas</button>
     <button class="primary" onclick="abrirFormulario()">+ Cita</button>
@@ -754,7 +756,7 @@ function cuerpoDia() {
   if (!cols.length) return `<div class="list"><p class="row muted">${esRecepcion() ? 'No hay trabajadores con este filtro. Añádelos en Ajustes → Equipo.' : 'Tu ficha de trabajador no está activa. Habla con recepción.'}</p></div>`;
   const htmlCols = cols.map(t => `<div class="col" style="height:${H}px" onclick="clicHueco(event,'${t.id}')">${sombras(S.day, OPEN, CLOSE)}${capasBloqueo(bloqueosDe(t.id, S.day), S.day, OPEN, CLOSE)}${visibles.filter(c => c.trabajador_id === t.id).map(c => bloqueCita(c, OPEN)).join('')}</div>`).join('');
   return `${bannerDia(S.day)}<div class="gridwrap"><div class="grid" style="--cols:${cols.length};--hour:${4 * PX}px">
-    <div class="ghead"><div></div>${cols.map(t => `<div>${esc(t.nombre)}<small>${esc([...(S.tAct[t.id] || [])].map(id => act(id).nombre).join(', ') || 'Sin actividad')}</small></div>`).join('')}</div>
+    <div class="ghead"><div></div>${cols.map(t => `<div>${avatarTrab(t, 30)}${esc(t.nombre)}<small>${esc([...(S.tAct[t.id] || [])].map(id => act(id).nombre).join(', ') || 'Sin actividad')}</small></div>`).join('')}</div>
     <div class="gbody"><div class="times" style="height:${H}px">${horasGrid(OPEN, CLOSE)}</div>${htmlCols}${S.day === dkey(new Date()) ? lineaAhora(OPEN, CLOSE) : ''}</div>
   </div></div>
   ${canceladas.length ? `<div class="sect">Canceladas este día (${canceladas.length})</div><div class="list">${canceladas.map(c => `<button class="row" onclick="abrirCita('${c.id}')"><span class="main"><b>${hhmm(new Date(c.inicio))} · ${esc(cli(c.cliente_id).nombre)}</b><small>${esc(nombreCita(c))} · ${esc(trab(c.trabajador_id).nombre)}</small></span></button>`).join('')}</div>` : ''}`;
@@ -791,7 +793,7 @@ function cuerpoMes(lista) {
       <span class="mnum">${dd.getDate()}${ch ? '<i class="mdot" title="Cabina compartida"></i>' : ''}</span>
       ${(b => b.length ? `<span class="mtag bl">Bloqueo: ${esc([...new Set(b.map(x => trab(x.trabajador_id).nombre))].join(', '))}</span>` : '')(bloqueosDe('', k).filter(x => columnas().some(t => t.id === x.trabajador_id)))}
       ${!hd.abierto ? `<span class="mtag">${esc(hd.especial ? (hd.motivo || 'Festivo') : 'Cerrado')}</span>` : hd.especial ? `<span class="mtag ab">${hd.ap}–${hd.ci}</span>` : ''}
-      ${cs.slice(0, 3).map(c => `<span class="mline" style="--c:${esc(act(srv(c.servicio_id).actividad_id).color)}">${hhmm(new Date(c.inicio))} ${esc(esRecepcion() && !S.filtroTrab ? trab(c.trabajador_id).nombre : cli(c.cliente_id).nombre)}</span>`).join('')}
+      ${cs.slice(0, 3).map(c => `<span class="mline" data-cita="${c.id}" style="--c:${esc(act(srv(c.servicio_id).actividad_id).color)}">${esRecepcion() && !S.filtroTrab ? avatarTrab(trab(c.trabajador_id), 14) : ''}${hhmm(new Date(c.inicio))} ${esc(esRecepcion() && !S.filtroTrab ? trab(c.trabajador_id).nombre : cli(c.cliente_id).nombre)}</span>`).join('')}
       ${cs.length > 3 ? `<span class="mmore">+${cs.length - 3} más</span>` : ''}
       ${cs.length ? `<span class="mcount">${cs.length}</span>` : ''}</button>`;
   }
@@ -1110,7 +1112,7 @@ async function abrirCita(id, idiomaMsg) {
     ${sinConf ? `<div class="box warnb">${esc(trab(c.trabajador_id).nombre)} aún no ha confirmado que ha visto esta cita.</div>` : ''}
     <dl class="kv">
       <dt>Cuándo</dt><dd>${ini.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })} · ${hhmm(ini)}–${hhmm(fin)}</dd>
-      <dt>Con</dt><dd>${esc(trab(c.trabajador_id).nombre)}</dd>
+      <dt>Con</dt><dd class="con-foto">${avatarTrab(trab(c.trabajador_id), 24)}${esc(trab(c.trabajador_id).nombre)}</dd>
       <dt>Cabina</dt><dd>${esc(cab(c.cabina_id).nombre)}</dd>
       <dt>Teléfono</dt><dd>${esc(verTel(cl.telefono, cl.pais_telefono) || '—')}</dd>${cl.fecha_nacimiento ? `<dt>Edad</dt><dd>${edad(cl.fecha_nacimiento)} años</dd>` : ''}${(cl.zonas_dolor || []).length ? `<dt>Molestias</dt><dd>${mapaCuerpo(cl.zonas_dolor, false, 'mc-cita').replace(/<div class="zchips"[\s\S]*$/, '').replace('class="mapa ', 'class="mapa mini ')}<b class="warn" style="display:block">${esc(textoZonas(cl.zonas_dolor))}</b></dd>` : ''}${cl.salud ? `<dt>Anotaciones</dt><dd class="warn"><b>${esc(cl.salud)}</b></dd>` : ''}
       ${S.puedeFacturar || c.precio != null ? `<dt>Precio</dt><dd>${eur(precioCita(c))}</dd>` : ''}
@@ -1882,6 +1884,118 @@ async function guardarCliente(id, siguiente) {
   closeSheet(); toast('Cliente guardado');
 }
 
+/* ================= fotos de los trabajadores ================= */
+const hayFotos = () => S.trabajadores.some(t => 'foto' in t);
+const verFotos = () => { try { return localStorage.getItem('agenda-fotos') !== 'no'; } catch (e) { return true; } };
+function alternarFotos() { try { localStorage.setItem('agenda-fotos', verFotos() ? 'no' : 'si'); } catch (e) { } renderVista(); }
+// Miniatura redonda: foto si la hay, iniciales si no
+function avatarTrab(t, tam = 32, forzar = false) {
+  if (!t) return '';
+  if (t.foto && (forzar || verFotos())) return `<img class="ava-foto" src="${esc(t.foto)}" alt="" style="width:${tam}px;height:${tam}px">`;
+  return forzar ? `<span class="avatar" style="width:${tam}px;height:${tam}px;font-size:${Math.round(tam * .38)}px">${esc(iniciales(t.nombre))}</span>` : '';
+}
+let _camara = null;
+function pararCamara() { if (_camara) { _camara.getTracks().forEach(t => t.stop()); _camara = null; } }
+// Pantalla para hacerse la foto (cámara del ordenador o del móvil) o elegirla de la galería
+async function abrirFoto(tid, volver) {
+  const t = trab(tid);
+  sheet(`<h3>${tid === S.meId && !esRecepcion() ? 'Tu foto' : 'Foto de ' + esc(t.nombre)}</h3>
+    <p class="muted" style="margin:0">Sale en la agenda para que el equipo os reconozca de un vistazo. Mejor de frente y con buena luz.</p>
+    <div class="selfie"><video id="sf-video" playsinline autoplay muted hidden></video><canvas id="sf-canvas" hidden></canvas>
+      <div id="sf-ver" class="sf-ver">${t.foto ? `<img src="${esc(t.foto)}" alt="">` : `<span class="avatar" style="width:120px;height:120px;font-size:42px">${esc(iniciales(t.nombre))}</span>`}</div></div>
+    <div class="err" id="sf-err"></div>
+    <div class="actions sf-botones">
+      <button class="primary" id="sf-camara">Hacer foto</button>
+      <label class="ghost boton">Elegir de la galería<input type="file" accept="image/*" capture="user" hidden id="sf-file"></label>
+      ${t.foto ? '<button class="ghost" id="sf-quitar">Quitar foto</button>' : ''}
+    </div>
+    <div class="actions"><button class="ghost" id="sf-cerrar">${volver ? 'Volver' : 'Cerrar'}</button><button class="primary" id="sf-guardar" disabled>Guardar foto</button></div>`);
+  let dato = null;
+  const ver = d => { dato = d; $('#sf-err').textContent = ''; $('#sf-ver').innerHTML = `<img src="${d}" alt="">`; $('#sf-ver').hidden = false; $('#sf-video').hidden = true; $('#sf-guardar').disabled = false; };
+  const recortar = (src, w, h, espejo) => { // cuadrado centrado de 256 px
+    const c = $('#sf-canvas'), lado = Math.min(w, h), L = 256; c.width = L; c.height = L;
+    const ctx = c.getContext('2d');
+    if (espejo) { ctx.translate(L, 0); ctx.scale(-1, 1); }
+    ctx.drawImage(src, (w - lado) / 2, (h - lado) / 2, lado, lado, 0, 0, L, L);
+    return c.toDataURL('image/jpeg', 0.85);
+  };
+  const cerrar = () => { pararCamara(); if (volver) volver(); else closeSheet(); };
+  $('#sf-cerrar').onclick = cerrar;
+  $('#sf-camara').onclick = async () => {
+    const v = $('#sf-video');
+    if (_camara) { ver(recortar(v, v.videoWidth, v.videoHeight, true)); pararCamara(); $('#sf-camara').textContent = 'Repetir foto'; return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { $('#sf-file').click(); return; }
+    try {
+      _camara = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 720 } }, audio: false });
+      v.srcObject = _camara; v.hidden = false; $('#sf-ver').hidden = true; $('#sf-camara').textContent = '📸 Disparar';
+    } catch (e) { $('#sf-err').textContent = 'No se ha podido abrir la cámara (¿permiso denegado?). Puedes elegir una foto de la galería.'; }
+  };
+  $('#sf-file').onchange = e => {
+    const f = e.target.files[0]; if (!f) return;
+    const img = new Image(), url = URL.createObjectURL(f);
+    img.onload = () => { pararCamara(); ver(recortar(img, img.width, img.height, false)); URL.revokeObjectURL(url); };
+    img.onerror = () => { $('#sf-err').textContent = 'No se pudo leer esa imagen.'; };
+    img.src = url;
+  };
+  const guardar = async foto => {
+    const propia = tid === S.meId && !esRecepcion();
+    const r = propia ? await sb.rpc('guardar_mi_foto', { p_foto: foto || '' }) : await sb.from('trabajadores').update({ foto: foto || null }).eq('id', tid);
+    if (r.error) { $('#sf-err').textContent = /guardar_mi_foto|foto/i.test(r.error.message) ? 'Falta la actualización 12 en la base de datos.' : r.error.message; return; }
+    S.trabajadores = S.trabajadores.map(x => x.id === tid ? { ...x, foto: foto || null } : x);
+    pararCamara(); toast(foto ? 'Foto guardada' : 'Foto quitada');
+    if (volver) volver(); else { closeSheet(); render(); }
+  };
+  $('#sf-guardar').onclick = () => dato && guardar(dato);
+  if ($('#sf-quitar')) $('#sf-quitar').onclick = () => guardar(null);
+}
+// Al entrar: si el trabajador aún no tiene foto, se le ofrece (una vez por dispositivo)
+function ofrecerFoto() {
+  if (esRecepcion() || !hayFotos() || !yo() || yo().foto) return;
+  const k = 'foto-ofrecida-' + S.meId;
+  try { if (localStorage.getItem(k)) return; localStorage.setItem(k, '1'); } catch (e) { return; }
+  sheet(`<div style="text-align:center"><span class="avatar" style="width:84px;height:84px;font-size:30px;margin:4px auto 10px">${esc(iniciales(yo().nombre))}</span>
+    <h3>¿Te haces una foto?</h3><p class="muted">Así recepción y el equipo te reconocen en la agenda. Puedes cambiarla o quitarla cuando quieras en <b>Cuenta</b>.</p></div>
+    <div class="actions"><button class="ghost" onclick="closeSheet()">Ahora no</button><button class="primary" onclick="abrirFoto(S.meId)">Hacerme un selfie</button></div>`);
+}
+
+/* ================= ficha flotante de la cita al pasar el ratón ================= */
+(function () {
+  if (!window.matchMedia || !matchMedia('(hover: hover) and (pointer: fine)').matches) return; // en móvil se toca y se abre
+  let card, actual = null;
+  const pintar = (c, e) => {
+    if (!card) { card = document.createElement('div'); card.className = 'ficha-flotante'; card.setAttribute('role', 'tooltip'); document.body.appendChild(card); }
+    if (actual !== c.id) {
+      actual = c.id;
+      const s = srv(c.servicio_id), a = act(s.actividad_id), cl = cli(c.cliente_id), t = trab(c.trabajador_id), ini = new Date(c.inicio), fin = new Date(c.fin);
+      const pend = S.avisos.filter(x => x.cita_id === c.id && !x.leido_en);
+      const flags = [S.choques.has(c.id) ? '<span class="flag red">Cabina compartida</span>' : '', pend.some(paraMi) ? '<span class="flag new">Nueva</span>' : '', esRecepcion() && pend.some(x => x.para_rol === 'trabajador') ? '<span class="flag wait">Sin confirmar</span>' : '', c.llego_tarde ? '<span class="flag wait">Llegó tarde</span>' : ''].join(' ');
+      card.style.setProperty('--c', a.color || 'var(--accent)');
+      card.innerHTML = `<div class="ff-hora">${hhmm(ini)}–${hhmm(fin)} · ${ini.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })}</div>
+        <b class="ff-cli">${esc(cl.nombre || 'Sin cliente')}</b>${typeof pendienteAlta === 'function' && cl.id && pendienteAlta(cl) ? ' <small class="warn">· pendiente de alta</small>' : ''}
+        <div class="ff-srv">${esc(nombreCita(c))} <small class="muted">· ${esc(a.nombre || '')}</small></div>
+        <div class="ff-fila">${avatarTrab(t, 26, true)}<span>${esc(t.nombre || '')}<small class="muted"> · ${esc(cab(c.cabina_id).nombre)}</small></span></div>
+        <div class="ff-pie"><span class="ff-estado e-${c.estado.replace(' ', '')}">${ESTADOS[c.estado]}</span>${S.puedeFacturar && precioCita(c) ? `<span class="muted">${eur(precioCita(c))}</span>` : ''}</div>
+        ${flags.trim() ? `<div class="ff-flags">${flags}</div>` : ''}
+        ${c.notas ? `<div class="ff-notas">${esc(c.notas)}</div>` : ''}`;
+    }
+    card.hidden = false;
+    const w = card.offsetWidth, h = card.offsetHeight;
+    let x = e.clientX + 16, y = e.clientY + 14;
+    if (x + w > window.innerWidth - 8) x = e.clientX - w - 16;
+    if (y + h > window.innerHeight - 8) y = Math.max(8, window.innerHeight - h - 8);
+    card.style.left = Math.max(8, x) + 'px'; card.style.top = y + 'px';
+  };
+  const ocultar = () => { if (card) card.hidden = true; actual = null; };
+  document.addEventListener('mousemove', e => {
+    const el = e.target.closest && e.target.closest('[data-cita]');
+    if (!el || $('#sheet').innerHTML) return ocultar();
+    const c = S.citas.find(x => x.id === el.dataset.cita);
+    c ? pintar(c, e) : ocultar();
+  });
+  document.addEventListener('scroll', ocultar, true);
+  document.addEventListener('click', ocultar, true);
+})();
+
 /* ================= historial de cambios ================= */
 const CAMPOS_TXT = {
   inicio: 'hora', fin: 'hora de fin', trabajador_id: 'profesional', cabina_id: 'cabina', servicio_id: 'servicio', estado: 'estado', precio: 'precio',
@@ -2388,7 +2502,7 @@ function vistaAjustes() {
   <div class="list"><div class="row"><span class="main"><b>${S.clientes.length.toLocaleString('es-ES')} clientes</b><small>Para empezar rápido, sube la lista que exportes de tu programa actual. Se detectan las columnas y se saltan los repetidos.</small></span></div></div>
 
   <div class="sect">Equipo<button class="pill" onclick="editarTrabajador()">+ Trabajador</button></div>
-  <div class="list">${S.trabajadores.map(t => `<button class="row" onclick="editarTrabajador('${t.id}')"><span class="avatar">${esc(iniciales(t.nombre))}</span><span class="main"><b>${esc(t.nombre)}${t.activo ? '' : ' <small class="muted">(de baja)</small>'}</b><small>${esc(t.email || 'Sin email: no podrá entrar en la app')}</small>
+  <div class="list">${S.trabajadores.map(t => `<button class="row" onclick="editarTrabajador('${t.id}')">${avatarTrab(t, 36, true)}<span class="main"><b>${esc(t.nombre)}${t.activo ? '' : ' <small class="muted">(de baja)</small>'}</b><small>${esc(t.email || 'Sin email: no podrá entrar en la app')}</small>
     <span class="tagline">${[...(S.tAct[t.id] || [])].map(id => `<span class="tag">${esc(act(id).nombre)}</span>`).join('')}${t.ver_facturacion ? '<span class="tag">Ve su facturación</span>' : ''}${t.email ? `<span class="tag" data-vinc="${t.id}">…</span>` : ''}</span></span></button>`).join('') || '<p class="row muted">Añade a tu primer trabajador.</p>'}</div>
 
   <div class="sect">Cabinas<button class="pill" onclick="editarCabina()">+ Cabina</button></div>
@@ -2405,7 +2519,9 @@ function vistaAjustes() {
 function vistaCuenta() {
   const permiso = 'Notification' in window ? Notification.permission : 'denied';
   const tm = temaActual();
-  return `<div class="sect">Apariencia</div>
+  return `${!esRecepcion() && hayFotos() && yo() ? `<div class="sect">Mi foto</div>
+  <div class="list"><div class="row">${avatarTrab(yo(), 48, true)}<span class="main"><b>${yo().foto ? 'Así te ve el equipo en la agenda' : 'Aún no tienes foto'}</b><small>Recepción y tus compañeros te reconocen de un vistazo.</small></span><button class="pill" onclick="abrirFoto(S.meId)">${yo().foto ? 'Cambiar' : 'Hacer selfie'}</button></div></div>` : ''}
+  <div class="sect">Apariencia</div>
   <div class="list"><div class="temas" role="group" aria-label="Apariencia">${TEMAS.map(([k, n, c]) => `<button type="button" class="tema" aria-pressed="${tm === k}" onclick="elegirTema('${k}')"><span class="muestra">${k === 'auto' ? `<i style="background:${c[0]}"></i><i style="background:${c[1]}"></i>` : `<i style="background:${c[0]}"></i><i style="background:${c[1]}"></i>`}</span>${n}</button>`).join('')}</div>
   <p class="note" style="margin:0 14px 12px">Automático cambia solo entre claro y oscuro según tu móvil u ordenador. La elección se guarda en este dispositivo.</p></div>
   <div class="sect">Este dispositivo</div>
@@ -2446,6 +2562,7 @@ function editarTrabajador(id) {
   const acts = S.tAct[id] || new Set(), cabs = S.tCab[id] || [];
   const principal = (cabs.find(x => x.principal) || {}).cabina_id;
   sheet(`<h3>${id ? esc(t.nombre) : 'Nuevo trabajador'}</h3>
+    ${id && hayFotos() ? `<div class="foto-fila">${avatarTrab(t, 56, true)}<button type="button" class="pill" onclick="abrirFoto('${id}', () => editarTrabajador('${id}'))">${t.foto ? 'Cambiar foto' : 'Hacer o subir foto'}</button></div>` : ''}
     <div class="field"><label for="t-nombre">Nombre</label><input id="t-nombre" value="${esc(t.nombre)}"></div>
     <div class="two"><div class="field"><label for="t-email">Email de acceso</label><input id="t-email" type="email" value="${esc(t.email || '')}" placeholder="nombre@correo.com"></div>
       <div class="field"><label for="t-tel">Teléfono</label><input id="t-tel" inputmode="tel" value="${esc(t.telefono || '')}"></div></div>
