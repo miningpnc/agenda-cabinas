@@ -1421,6 +1421,8 @@ function leerTel(id) {
   return { telefono: '+' + paisDe(pais)[2] + num, pais_telefono: pais };
 }
 const hayFicha = () => S.clientes.some(c => 'nombre_pila' in c);
+const hayDoc = () => S.clientes.some(c => 'numero_documento' in c);
+const nombrePais = code => code === 'OT' ? 'Otra' : (PAISES.find(p => p[0] === code) || [])[1] || '';
 const sinAcentos = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '');
 const normNombre = s => sinAcentos(s).toLowerCase().replace(/\s+/g, ' ').trim();
 // búsqueda sin distinguir mayúsculas, minúsculas ni acentos; vale en cualquier orden («martinez maria»)
@@ -1483,7 +1485,7 @@ function hojaConsentimiento(c, op = {}) {
   return `<article class="hoja">
   <header><h1>Consentimiento para el tratamiento de datos personales</h1><p>${esc(resp)}${A.cif ? ' · CIF ' + esc(A.cif) : ''}</p></header>
   <h2>Datos del cliente</h2>
-  <table>${fila('Nombre y apellidos', c.nombre)}${fila('Fecha de nacimiento', c.fecha_nacimiento ? fechaLargaD(c.fecha_nacimiento + 'T12:00') : '')}${fila('Teléfono', verTel(c.telefono, c.pais_telefono))}${fila('Correo electrónico', c.email)}${fila('Dirección', c.direccion)}</table>
+  <table>${fila('Nombre y apellidos', c.nombre)}${c.numero_documento ? fila(c.tipo_documento || 'Documento', c.numero_documento) : fila('Documento de identidad', '')}${fila('Nacionalidad', nombrePais(c.nacionalidad))}${fila('Fecha de nacimiento', c.fecha_nacimiento ? fechaLargaD(c.fecha_nacimiento + 'T12:00') : '')}${fila('Teléfono', verTel(c.telefono, c.pais_telefono))}${fila('Correo electrónico', c.email)}${fila('Dirección', c.direccion)}</table>
   <h2>Información básica sobre protección de datos</h2>
   <p class="ley">Reglamento (UE) 2016/679 (RGPD) y Ley Orgánica 3/2018 de Protección de Datos Personales y garantía de los derechos digitales.</p>
   <dl>
@@ -1500,6 +1502,8 @@ function hojaConsentimiento(c, op = {}) {
   <p class="lugar">En ${esc(pobl)}, a ${op.fecha ? fechaLargaD(op.fecha) : '____ de ______________ de ________'}.</p>
   <div class="firma"><div class="caja">${op.firma ? `<img src="${op.firma}" alt="Firma del cliente">` : ''}</div><p>Firma: ${esc(c.nombre)}</p></div>
   ${op.tipo === 'papel' ? '<p class="nota">Firmado en papel. El original se conserva en el centro.</p>' : ''}
+  ${op.tipo === 'rechazo' ? '<p class="nota"><b>El cliente no ha querido firmar.</b> Se le atiende igualmente; no se guardan anotaciones sobre su salud ni se le envían recordatorios.</p>' : ''}
+  <p class="nota pie">Firmar este documento es voluntario. Si no desea firmarlo, se le atenderá igualmente, pero no se guardarán anotaciones sobre su salud ni recibirá recordatorios de sus citas.</p>
 </article>`;
 }
 function imprimirHoja(html) {
@@ -1515,11 +1519,11 @@ async function abrirConsentimiento(id) {
   const c = cli(id);
   const r = await sb.from('consentimientos').select('id,tipo,acepta_salud,acepta_comunicaciones,firmado_en').eq('cliente_id', id).order('firmado_en', { ascending: false });
   const hist = r.data || [];
-  const TIPO = { firma: 'Firmado en la app', papel: 'Firmado en papel', retirada: 'Consentimiento retirado' };
+  const TIPO = { firma: 'Firmado en la app', papel: 'Firmado en papel', retirada: 'Consentimiento retirado', rechazo: 'No quiso firmar' };
   sheet(`<h3>Protección de datos</h3><p class="muted" style="margin:0">${esc(c.nombre)}</p>
-    <div class="box ${c.consentimiento_salud ? 'info' : 'warnb'}">${c.consentimiento_salud ? `<b>Consentimiento firmado</b> el ${fechaLargaD(c.consentimiento_salud_en)}. Se pueden guardar anotaciones de salud.${c.consentimiento_comunicaciones ? ' Acepta recordatorios.' : ' No acepta recordatorios.'}` : '<b>Sin consentimiento firmado.</b> Genera la hoja para que el cliente la firme en pantalla o en papel.'}</div>
+    <div class="box ${c.consentimiento_salud ? 'info' : 'warnb'}">${c.consentimiento_salud ? `<b>Consentimiento firmado</b> el ${fechaLargaD(c.consentimiento_salud_en)}. Se pueden guardar anotaciones de salud.${c.consentimiento_comunicaciones ? ' Acepta recordatorios.' : ' No acepta recordatorios.'}` : (c.consentimiento_rechazado_en ? `<b>No quiso firmar</b> el ${fechaLargaD(c.consentimiento_rechazado_en)}. Se le atiende igual, sin anotaciones de salud ni recordatorios.` : '<b>Sin consentimiento firmado.</b> Genera la hoja para que el cliente la firme en pantalla o en papel.')}</div>
     <div class="actions"><button class="primary" onclick="pantallaFirma('${id}')">Nuevo consentimiento</button><button class="ghost" onclick="imprimirHoja(hojaConsentimiento(cli('${id}')))">Imprimir en blanco</button></div>
-    ${hist.length ? `<div class="sect">Historial</div><div class="list">${hist.map(h => `<button class="row" onclick="verConsentimiento('${h.id}')"><span class="main"><b>${TIPO[h.tipo]}</b><small>${new Date(h.firmado_en).toLocaleString('es-ES', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}${h.tipo !== 'retirada' ? ` · salud: ${h.acepta_salud ? 'sí' : 'no'} · recordatorios: ${h.acepta_comunicaciones ? 'sí' : 'no'}` : ''}</small></span><span class="end muted">Ver</span></button>`).join('')}</div>` : ''}
+    ${hist.length ? `<div class="sect">Historial</div><div class="list">${hist.map(h => `<button class="row" onclick="verConsentimiento('${h.id}')"><span class="main"><b>${TIPO[h.tipo]}</b><small>${new Date(h.firmado_en).toLocaleString('es-ES', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}${h.tipo !== 'retirada' && h.tipo !== 'rechazo' ? ` · salud: ${h.acepta_salud ? 'sí' : 'no'} · recordatorios: ${h.acepta_comunicaciones ? 'sí' : 'no'}` : ''}</small></span><span class="end muted">Ver</span></button>`).join('')}</div>` : ''}
     ${c.consentimiento_salud && esRecepcion() ? `<div class="actions"><button class="ghost" onclick="retirarConsentimiento('${id}')">El cliente retira su consentimiento</button></div>` : ''}
     <div class="actions"><button class="ghost" onclick="abrirCliente('${id}')">Volver a la ficha</button></div>
     <p class="note">Texto orientativo: conviene que el asesor legal o el delegado de protección de datos del centro lo revise antes de usarlo con clientes reales.</p>`);
@@ -1536,7 +1540,9 @@ function pantallaFirma(id) {
   const c = cli(id);
   const op = { salud: true, comunicaciones: true };
   const pintarHoja = () => { $('#cs-hoja').innerHTML = hojaConsentimiento(c, { ...op, fecha: new Date() }); };
-  sheet(`<h3>Consentimiento de datos</h3><p class="muted" style="margin:0">Revisa los datos con el cliente. Si falta algo, complétalo antes en su ficha.</p>
+  const faltan = [hayDoc() && !c.numero_documento ? 'documento de identidad' : '', !c.fecha_nacimiento ? 'fecha de nacimiento' : '', !c.telefono ? 'teléfono' : ''].filter(Boolean);
+  sheet(`<h3>Consentimiento de datos</h3><p class="muted" style="margin:0">Revisa los datos con el cliente.</p>
+    ${faltan.length ? `<div class="box warnb">Faltan datos para identificar bien al cliente: <b>${faltan.join(', ')}</b>. <button class="linkbtn" onclick="abrirCliente('${id}')">Completar ficha</button></div>` : ''}
     <div class="hoja-pantalla" id="cs-hoja"></div>
     <label class="chk" style="margin-top:12px"><input type="checkbox" id="cs-salud" checked> <span>Autoriza anotar datos sobre su salud o molestias</span></label>
     <label class="chk" style="margin-top:8px"><input type="checkbox" id="cs-com" checked> <span>Autoriza recordatorios por WhatsApp, SMS o correo</span></label>
@@ -1546,6 +1552,7 @@ function pantallaFirma(id) {
     <div class="err" id="cs-err"></div>
     <div class="actions"><button class="primary" id="cs-guardar">Guardar firma</button></div>
     <div class="actions"><button class="ghost" id="cs-imprimir">Imprimir para firmar en papel</button><button class="ghost" id="cs-papel">Ya está firmado en papel</button></div>
+    ${hayDoc() ? '<div class="actions"><button class="ghost" id="cs-rechazo">El cliente no quiere firmar</button></div>' : ''}
     <div class="actions"><button class="ghost" onclick="abrirConsentimiento('${id}')">Cancelar</button></div>`);
   pintarHoja();
   $('#cs-salud').onchange = e => { op.salud = e.target.checked; pintarHoja(); };
@@ -1565,7 +1572,7 @@ function pantallaFirma(id) {
     const texto = hojaConsentimiento(c, { ...op, fecha, firma, tipo });
     const r = await sb.from('consentimientos').insert({ cliente_id: id, tipo, acepta_salud: op.salud, acepta_comunicaciones: op.comunicaciones, texto, datos: datos(), firma: firma || null, firmado_en: fecha.toISOString() });
     if (r.error) { $('#cs-err').textContent = traducirError(r.error); return; }
-    await cargarClientes(); toast(tipo === 'papel' ? 'Registrado como firmado en papel' : 'Consentimiento firmado y guardado');
+    await cargarClientes(); toast(tipo === 'papel' ? 'Registrado como firmado en papel' : tipo === 'rechazo' ? 'Anotado: no ha querido firmar' : 'Consentimiento firmado y guardado');
     abrirConsentimiento(id);
   };
   $('#cs-guardar').onclick = () => {
@@ -1576,6 +1583,10 @@ function pantallaFirma(id) {
     guardar('firma', t.toDataURL('image/png'));
   };
   $('#cs-imprimir').onclick = () => imprimirHoja(hojaConsentimiento(c, {}));
+  if ($('#cs-rechazo')) $('#cs-rechazo').onclick = async () => {
+    if (!(await preguntar('El cliente no quiere firmar', `Quedará anotado que ${c.nombre} no ha querido firmar. Se le atiende igual, pero sin anotaciones de salud ni recordatorios.`, 'Anotar', 'Cancelar'))) return;
+    op.salud = false; op.comunicaciones = false; guardar('rechazo', null);
+  };
   $('#cs-papel').onclick = async () => {
     if (await preguntar('¿Firmado en papel?', `Confirma que ${c.nombre} ha firmado la hoja impresa con las autorizaciones marcadas aquí. Guarda el original en el centro.`, 'Sí, está firmado', 'Cancelar')) guardar('papel', null);
   };
@@ -1640,15 +1651,18 @@ function formCliente(c) {
   return `${ficha ? `<div class="two"><div class="field"><label for="c-nombre">Nombre *</label><input id="c-nombre" onblur="this.value=capitalizar(this.value)" value="${esc(pila || '')}" autocomplete="off"></div>
       <div class="field"><label for="c-apellidos">Apellidos *</label><input id="c-apellidos" onblur="this.value=capitalizar(this.value)" value="${esc(apell || '')}" autocomplete="off"></div></div>
     <div class="two"><div class="field"><label for="c-nac">Fecha de nacimiento</label><input id="c-nac" type="date" value="${esc(c.fecha_nacimiento || '')}"></div>
-      <div class="field"><label for="c-sexo">Sexo</label><select id="c-sexo"><option value="">—</option>${[['mujer', 'Mujer'], ['hombre', 'Hombre'], ['otro', 'Otro'], ['nd', 'Prefiere no decirlo']].map(([k, v]) => `<option value="${k}" ${c.sexo === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div></div>`
+      <div class="field"><label for="c-sexo">Sexo</label><select id="c-sexo"><option value="">—</option>${[['mujer', 'Mujer'], ['hombre', 'Hombre'], ['otro', 'Otro'], ['nd', 'Prefiere no decirlo']].map(([k, v]) => `<option value="${k}" ${c.sexo === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div></div>
+    ${hayDoc() ? `<div class="two"><div class="field"><label for="c-tdoc">Documento</label><select id="c-tdoc">${['DNI', 'NIE', 'Pasaporte', 'Documento de su país'].map(t => `<option ${(c.tipo_documento || (c.pais_telefono && c.pais_telefono !== 'ES' ? 'Pasaporte' : 'DNI')) === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+      <div class="field"><label for="c-ndoc">Número de documento</label><input id="c-ndoc" value="${esc(c.numero_documento || '')}" autocomplete="off" style="text-transform:uppercase"></div></div>
+    <div class="field"><label for="c-nac-pais">Nacionalidad</label><select id="c-nac-pais"><option value="">—</option>${[...PAISES].sort((a, b) => a[1].localeCompare(b[1], 'es')).map(x => `<option value="${x[0]}" ${x[0] === (c.nacionalidad || '') ? 'selected' : ''}>${x[1]}</option>`).join('')}<option value="OT" ${c.nacionalidad === 'OT' ? 'selected' : ''}>Otra</option></select></div>` : ''}`
     : `<div class="field"><label for="c-nombre">Nombre y apellidos</label><input id="c-nombre" onblur="this.value=capitalizar(this.value)" value="${esc(c.nombre || '')}"></div>`}
     <div class="field"><label for="c-tel-num">Teléfono</label>${campoTel('c-tel', c.telefono, c.pais_telefono)}<small class="muted">Elige el país o pega el número con su prefijo (+44…) y se detecta solo.</small></div>
     <div class="two"><div class="field"><label for="c-email">Email</label><input id="c-email" type="email" value="${esc(c.email || '')}"></div>
       <div class="field"><label for="c-lang">Idioma</label><select id="c-lang">${Object.entries(LANGS).map(([k, v]) => `<option value="${k}" ${k === (c.idioma || 'es') ? 'selected' : ''}>${v}</option>`).join('')}</select></div></div>
     ${ficha ? `<div class="field"><label for="c-dir">Dirección</label><input id="c-dir" value="${esc(c.direccion || '')}" placeholder="Calle, número, población"></div>
     <div class="salud">
-      ${hayConsent() ? `<div class="cons-estado"><label class="chk"><input type="checkbox" id="c-cons" ${c.consentimiento_salud ? 'checked' : ''} disabled> <span><b>${c.consentimiento_salud ? 'Consentimiento firmado' : 'Sin consentimiento firmado'}</b>${c.consentimiento_salud_en ? ` <small class="muted">el ${fechaCorta(c.consentimiento_salud_en)}</small>` : ''}<br><small class="muted">${c.consentimiento_salud ? 'Se pueden guardar anotaciones.' : 'Para escribir anotaciones, el cliente debe firmar el consentimiento.'}</small></span></label>
-        ${c.id ? `<button type="button" class="pill" onclick="abrirConsentimiento('${c.id}')">Consentimiento de datos</button>` : '<small class="muted">Guarda primero el cliente para generar la hoja de consentimiento.</small>'}</div>`
+      ${hayConsent() ? `<button type="button" class="primary ancho" onclick="${c.id ? `guardarCliente('${c.id}','consent')` : `guardarCliente(null,'consent')`}">Consentimiento de datos: imprimir o firmar</button>
+        <p class="cons-txt ${c.consentimiento_salud ? 'ok' : c.consentimiento_rechazado_en ? 'bad' : 'warn'}"><input type="checkbox" id="c-cons" ${c.consentimiento_salud ? 'checked' : ''} disabled aria-label="Consentimiento firmado"><span>${c.consentimiento_salud ? `<b>Firmado</b> el ${fechaCorta(c.consentimiento_salud_en)}. Ya se pueden escribir anotaciones.` : c.consentimiento_rechazado_en ? `<b>No quiso firmar</b> (${fechaCorta(c.consentimiento_rechazado_en)}). Se le atiende igual, sin anotaciones de salud.` : `<b>Pendiente de firma.</b> ${c.id ? 'Pulsa el botón para imprimir la hoja o firmarla en pantalla.' : 'El botón guarda la ficha y prepara la hoja con estos datos.'}`}</span></p>`
       : `<label class="chk"><input type="checkbox" id="c-cons" ${c.consentimiento_salud ? 'checked' : ''} onchange="$('#c-salud').disabled=!this.checked"> <span><b>El cliente da su consentimiento</b> para guardar anotaciones sobre su salud o molestias</span></label>`}
       <div class="field"><label for="c-salud">Anotaciones del cliente</label><textarea id="c-salud" rows="3" ${c.consentimiento_salud ? '' : 'disabled'} placeholder="Ej.: tiene problemas de espalda · deportista, juega al tenis y se queja del brazo">${esc(c.salud || '')}</textarea>
       <small class="muted">Solo lo ven recepción y quien atiende a este cliente.</small></div></div>` : ''}
@@ -1667,6 +1681,7 @@ function datosFormCliente(orig = {}) {
     nombre: pila + ' ' + apell, nombre_pila: pila, apellidos: apell,
     telefono: tl.telefono, pais_telefono: tl.pais_telefono, idioma: $('#c-lang').value, email: $('#c-email').value.trim() || null,
     fecha_nacimiento: $('#c-nac').value || null, sexo: $('#c-sexo').value || null, direccion: $('#c-dir').value.trim() || null,
+    ...(hayDoc() ? { tipo_documento: $('#c-tdoc').value, numero_documento: $('#c-ndoc').value.toUpperCase().replace(/[\s.-]/g, '') || null, nacionalidad: $('#c-nac-pais').value || null } : {}),
     ...consCampos,
     notas: $('#c-notas').value.trim() || null } };
 }
@@ -1699,14 +1714,20 @@ function unirCliente(id) {
   };
   $('#u-q').oninput = pintar; pintar();
 }
-async function guardarCliente(id) {
+async function guardarCliente(id, siguiente) {
   const orig = id ? cli(id) : {};
-  const fd = datosFormCliente(orig); if (fd.error) { $('#c-err').textContent = fd.error; return; }
+  const fd = datosFormCliente(orig); if (fd.error) { $('#c-err').textContent = fd.error; $('#c-err').scrollIntoView({ block: 'center' }); return; }
   const d = fd.d;
+  if (d.numero_documento) {
+    const mismoDoc = S.clientes.find(x => x.id !== id && (x.numero_documento || '').toUpperCase() === d.numero_documento);
+    if (mismoDoc && !(await preguntar('Documento repetido', `${mismoDoc.nombre} ya tiene el documento ${d.numero_documento}. Puede que este cliente ya exista.`, 'Guardar igualmente', 'Revisar', true))) return;
+  }
   if ((!id || normNombre(orig.nombre) !== normNombre(d.nombre)) && !(await confirmarDuplicado(d.nombre, d.fecha_nacimiento, id))) return;
   const r = id ? await sb.from('clientes').update(d).eq('id', id).select().maybeSingle() : await sb.from('clientes').insert(d).select().single();
   if (r.error || !r.data) { $('#c-err').textContent = r.error ? traducirError(r.error) : 'No tienes permiso.'; return; }
-  await cargarClientes(); closeSheet(); renderVista(); toast('Cliente guardado');
+  await cargarClientes(); renderVista();
+  if (siguiente === 'consent') { toast('Ficha guardada'); pantallaFirma(r.data.id); return; }
+  closeSheet(); toast('Cliente guardado');
 }
 
 /* ================= facturación ================= */
