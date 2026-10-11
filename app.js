@@ -1256,7 +1256,7 @@ function calcFin(h, dur) { return minToT((toMin(h) + (+dur || 30)) % 1440); }
 function pintarCliente() {
   const box = $('#f-cli-box'); if (!box) return;
   if (F.cliente) {
-    box.innerHTML = `<div class="picked"><span class="avatar">${esc(iniciales(F.cliente.nombre))}</span><span class="grow" style="min-width:0"><b>${esc(F.cliente.nombre)}</b><br><small>${esc(detalleCliente(F.cliente))}</small>${lineaHistorial(F.cliente.id) ? '<br><small>' + lineaHistorial(F.cliente.id) + '</small>' : ''}${F.cliente.salud ? `<br><small class="warn"><b>Salud:</b> ${esc(F.cliente.salud)}</small>` : ''}</span><button class="pill" type="button" onclick="F.cliente=null;pintarCliente()">Cambiar</button></div>`;
+    box.innerHTML = `<div class="picked"><span class="avatar">${esc(iniciales(F.cliente.nombre))}</span><span class="grow" style="min-width:0"><b>${esc(F.cliente.nombre)}</b><br><small>${esc(detalleCliente(F.cliente))}</small>${lineaHistorial(F.cliente.id) ? '<br><small>' + lineaHistorial(F.cliente.id) + '</small>' : ''}${F.cliente.salud ? `<br><small class="warn"><b>Anotaciones:</b> ${esc(F.cliente.salud)}</small>` : ''}</span><button class="pill" type="button" onclick="F.cliente=null;pintarCliente()">Cambiar</button></div>`;
     return;
   }
   if (F.creandoCliente) {
@@ -1513,8 +1513,8 @@ function formCliente(c) {
       <div class="field"><label for="c-lang">Idioma</label><select id="c-lang">${Object.entries(LANGS).map(([k, v]) => `<option value="${k}" ${k === (c.idioma || 'es') ? 'selected' : ''}>${v}</option>`).join('')}</select></div></div>
     ${ficha ? `<div class="field"><label for="c-dir">Dirección</label><input id="c-dir" value="${esc(c.direccion || '')}" placeholder="Calle, número, población"></div>
     <div class="salud">
-      <label class="chk"><input type="checkbox" id="c-cons" ${c.consentimiento_salud ? 'checked' : ''} onchange="$('#c-salud').disabled=!this.checked"> <span><b>El cliente da su consentimiento</b> para guardar datos de salud relevantes para el tratamiento${c.consentimiento_salud_en ? ` <small class="muted">(desde ${fechaCorta(c.consentimiento_salud_en)})</small>` : ''}</span></label>
-      <div class="field"><label for="c-salud">Salud: alergias, lesiones, dolencias o contraindicaciones</label><textarea id="c-salud" rows="3" ${c.consentimiento_salud ? '' : 'disabled'} placeholder="Ej.: alergia al látex, operado de rodilla en 2022, embarazo…">${esc(c.salud || '')}</textarea>
+      <label class="chk"><input type="checkbox" id="c-cons" ${c.consentimiento_salud ? 'checked' : ''} onchange="$('#c-salud').disabled=!this.checked"> <span><b>El cliente da su consentimiento</b> para guardar anotaciones sobre su salud o molestias${c.consentimiento_salud_en ? ` <small class="muted">(desde ${fechaCorta(c.consentimiento_salud_en)})</small>` : ''}</span></label>
+      <div class="field"><label for="c-salud">Anotaciones del cliente</label><textarea id="c-salud" rows="3" ${c.consentimiento_salud ? '' : 'disabled'} placeholder="Ej.: tiene problemas de espalda · deportista, juega al tenis y se queja del brazo">${esc(c.salud || '')}</textarea>
       <small class="muted">Solo lo ven recepción y quien atiende a este cliente.</small></div></div>` : ''}
     <div class="field"><label for="c-notas">Notas y preferencias</label><textarea id="c-notas" rows="2" placeholder="Prefiere tardes, presión suave…">${esc(c.notas || '')}</textarea></div>`;
 }
