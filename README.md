@@ -21,9 +21,9 @@ Agenda de citas para centros con varias actividades (fisioterapia, estética, u�
 
 ## Instalar en un centro nuevo
 1. Crear un proyecto de Supabase en región UE y ejecutar `supabase.sql`.
-2. En Supabase → Authentication → Sign In / Providers → Email: desactivar **Confirm email**.
-3. Poner la URL y la clave publishable en `config.js`.
-4. Publicar con GitHub Pages.
-5. La primera persona que se registra en la app queda como **recepción**.
+2. En Supabase → Authentication → Sign In / Providers: desactivar **Allow new users to sign up** (nadie puede registrarse por su cuenta).
+3. Crear los usuarios en Authentication → Users → Add user (marcando *Auto Confirm User*). Si se crean antes de ejecutar el SQL, el bloque final del script los vincula (recepción y trabajadores por su email).
+4. Poner la URL y la clave publishable en `config.js`.
+5. Publicar con GitHub Pages.
 
 Cada centro usa su propio proyecto de Supabase: sus datos nunca se mezclan con los de otro.

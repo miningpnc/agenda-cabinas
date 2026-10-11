@@ -10,11 +10,11 @@ window.APP_CONFIG = {
   permitirRegistro: false,
 
   // Pantalla de demostración con dos botones de entrada.
-  // Pon aquí los mismos emails y contraseñas que crees en Supabase → Authentication → Users.
-  // Usa contraseñas SOLO para la demo: este archivo es público.
+  // Deben coincidir con los usuarios creados en Supabase → Authentication → Users.
+  // Este archivo es público: usa estas contraseñas SOLO para la demo.
   demo: {
     activa: true,
-    recepcion:  { email: 'miningpnc+recepcion@gmail.com', password: 'CAMBIA-ESTA-CLAVE-1' },
-    trabajador: { email: 'miningpnc+laura@gmail.com',     password: 'CAMBIA-ESTA-CLAVE-2' }
+    recepcion:  { email: 'miningpnc+recepcion@gmail.com', password: 'recepcion' },
+    trabajador: { email: 'miningpnc+maria@gmail.com',     password: 'trabajador' }
   }
 };
