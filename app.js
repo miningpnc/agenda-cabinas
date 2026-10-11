@@ -294,6 +294,7 @@ async function iniciarApp() {
   try { await cargarBase(); } catch (e) { return pantallaError(e.message || String(e)); }
   S.puedeFacturar = esRecepcion() || !!(yo() && yo().ver_facturacion);
   await Promise.all([cargarDia(), cargarAvisos()]);
+  elegirFrase();
   suscribir();
   render();
 }
@@ -379,6 +380,58 @@ function suscribir() {
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { cargarAvisos().then(pintarCampana); refrescarPronto(); } });
 }
 
+
+/* ================= saludo y frase del día ================= */
+const FRASES = [
+  ['Un viaje de mil millas comienza con un solo paso.', 'Tao Te Ching'],
+  ['Cae siete veces, levántate ocho.', 'Proverbio japonés'],
+  ['El mejor momento para plantar un árbol fue hace veinte años. El segundo mejor momento es ahora.', 'Proverbio chino'],
+  ['Cuando bebas agua, recuerda la fuente.', 'Proverbio chino'],
+  ['La paciencia es un árbol de raíz amarga pero de frutos muy dulces.', 'Proverbio persa'],
+  ['El agua blanda vence a la roca dura.', 'Proverbio chino'],
+  ['Antes de la iluminación, cortar leña y acarrear agua. Después de la iluminación, cortar leña y acarrear agua.', 'Proverbio zen'],
+  ['Si caminas solo, irás más rápido. Si caminas acompañado, llegarás más lejos.', 'Proverbio africano'],
+  ['No hay camino hacia la paz: la paz es el camino.', 'Sabiduría zen'],
+  ['La gota abre la piedra no por su fuerza, sino por su constancia.', 'Proverbio latino'],
+  ['Una sonrisa cuesta menos que la electricidad y da más luz.', 'Proverbio escocés'],
+  ['El bambú que se dobla es más fuerte que el roble que resiste.', 'Proverbio japonés'],
+  ['Inhala calma, exhala prisa.', 'Respiración consciente'],
+  ['Haz una cosa cada vez, y hazla con todo tu cuidado.', 'Práctica zen'],
+  ['Las manos que ayudan valen más que los labios que rezan.', 'Proverbio popular'],
+  ['El que mueve montañas empieza apartando piedras pequeñas.', 'Proverbio chino'],
+  ['Hoy es un buen día para cuidar de alguien, también de ti.', 'Frase del día'],
+  ['La mente es como el agua: cuando está agitada no ves el fondo; cuando está en calma, todo se aclara.', 'Sabiduría oriental'],
+  ['Donde pones tu atención, pones tu energía.', 'Enseñanza del yoga'],
+  ['Cada cliente que se va mejor de lo que llegó es un pequeño éxito.', 'Frase del día'],
+  ['No cuentes los días: haz que los días cuenten.', 'Frase del día'],
+  ['Escucha con las manos, cuida con la mirada.', 'Frase del día'],
+  ['El cuerpo dice lo que las palabras callan.', 'Sabiduría popular'],
+  ['Sé como el sauce: flexible ante el viento y firme en la raíz.', 'Proverbio chino'],
+  ['La calma también se contagia.', 'Frase del día'],
+  ['Quien domina su respiración domina su día.', 'Enseñanza del yoga'],
+  ['Lo que haces cada día importa más que lo que haces de vez en cuando.', 'Frase del día'],
+  ['Las grandes obras se hacen con pequeños gestos bien hechos.', 'Frase del día'],
+  ['El sol no pregunta si merece brillar: simplemente brilla.', 'Frase del día'],
+  ['Aprende a estar presente: el ahora es el único momento que tienes.', 'Práctica de atención plena'],
+  ['La perseverancia es el camino del éxito.', 'Proverbio chino'],
+  ['Un buen equipo convierte un día difícil en un día más.', 'Frase del día'],
+  ['El descanso también es parte del trabajo.', 'Frase del día'],
+  ['Trata cada cita como si fuera la primera.', 'Frase del día'],
+  ['Con orden y calma se llega a todo.', 'Refrán popular'],
+  ['No es más rico quien más tiene, sino quien menos necesita.', 'Proverbio popular'],
+  ['La flor no compite con la flor de al lado: simplemente florece.', 'Sabiduría zen'],
+  ['Postura firme, respiración suave, mente tranquila.', 'Enseñanza del yoga'],
+  ['La amabilidad es el idioma que todos entienden.', 'Frase del día'],
+  ['Tu energía de hoy es el cuidado que darás a otros.', 'Frase del día']
+];
+function saludo() { const h = new Date().getHours(); return h >= 6 && h < 14 ? 'Buenos días' : h >= 14 && h < 21 ? 'Buenas tardes' : 'Buenas noches'; }
+function nombreSaludo() { if (esRecepcion()) return 'Recepción'; return (yo()?.nombre || '').split(' ')[0]; }
+function elegirFrase() {
+  let i = Math.floor(Math.random() * FRASES.length);
+  try { const ult = +localStorage.getItem('agenda-frase'); if (i === ult) i = (i + 1) % FRASES.length; localStorage.setItem('agenda-frase', i); } catch (e) { }
+  S.frase = FRASES[i];
+}
+
 /* ================= estructura ================= */
 const LOGO = '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M8 14h3M13 14h3M8 17h3" stroke-linecap="round"/></svg>';
 const ICONOS = {
@@ -399,9 +452,10 @@ function pestañas() {
 function render() {
   $('#app').innerHTML = `<div class="wrap">
     <header class="top"><div class="logo">${LOGO}</div>
-      <div class="t"><h1>${esc(S.ajustes.nombre_centro || 'Mi centro')}</h1><small>${esRecepcion() ? 'Recepción' : esc(yo()?.nombre || '')}${DEMO ? ' · <span class="demo-tag">Demo</span>' : ''}</small></div>
+      <div class="t"><h1>${saludo()}${nombreSaludo() ? ', ' + esc(nombreSaludo()) : ''}</h1><small>${esc(S.ajustes.nombre_centro || 'Mi centro')}${esRecepcion() ? ' · Recepción' : ''}${DEMO ? ' · <span class="demo-tag">Demo</span>' : ''}</small></div>
       <button class="bell" id="bell" aria-label="Avisos" onclick="abrirAvisos()">${BELL}<b id="bell-n" hidden></b></button>
     </header>
+    ${S.frase ? `<p class="frase">«${esc(S.frase[0])}» <span>— ${esc(S.frase[1])}</span></p>` : ''}
     <main id="view"></main></div>
     <nav class="tabs" aria-label="Secciones">${pestañas().map(([k, l]) => `<button data-tab="${k}" aria-current="${S.tab === k ? 'page' : 'false'}" onclick="irA('${k}')">${ICONOS[k]}${l}</button>`).join('')}</nav>`;
   renderVista(); pintarCampana();
