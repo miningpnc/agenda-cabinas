@@ -632,6 +632,7 @@ function render() {
   $('#app').innerHTML = `<div class="wrap">
     <header class="top">${logoCentro()}
       <div class="t"><h1>${S.cumple ? '¡Feliz cumpleaños, ' + esc(nombreSaludo()) + '!' : saludo() + (nombreSaludo() ? ', ' + esc(nombreSaludo()) : '')}</h1><small>${esc(S.ajustes.nombre_centro || 'Mi centro')}${esRecepcion() ? (S.propietario ? ' · Dirección' : ' · Recepción') : ''}${DEMO ? ' · <span class="demo-tag">Demo</span>' : ''}</small></div>
+      <button class="bell" id="hist" aria-label="Lo que he hecho" title="Lo que he hecho · deshacer" onclick="abrirActividad()">${HIST_ICON}</button>
       <button class="bell" id="bell" aria-label="Avisos" onclick="abrirAvisos()">${BELL}<b id="bell-n" hidden></b></button>
     </header>
     ${S.frase ? (S.frase[2] ? `<p class="frase especial ${S.frase[2]}">${esc(S.frase[0])} <span>— ${esc(S.frase[1])}</span></p>` : `<p class="frase">«${esc(S.frase[0])}» <span>— ${esc(S.frase[1])}</span></p>`) : ''}
@@ -1397,7 +1398,7 @@ function abrirAvisos() {
   sheet(`<h3>Avisos</h3><p class="muted" style="margin:0">${l.length ? `${l.length} sin confirmar` : 'No tienes avisos pendientes.'}</p>
     ${permiso === 'default' ? '<div class="box info">Activa las notificaciones para enterarte aunque tengas la app en segundo plano.<div class="actions" style="margin-top:8px"><button class="primary" onclick="activarNotificaciones()">Activar notificaciones</button></div></div>' : ''}
     ${l.length ? `<div class="list" style="margin-top:12px">${l.map(a => `<div class="row"><span class="main"><b style="white-space:normal">${esc(a.mensaje)}</b><small>${new Date(a.creado_en).toLocaleString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</small></span>
-      <span style="display:grid;gap:6px">${a.cita_id ? `<button class="pill" onclick="verCitaAviso('${a.cita_id}')">Ver</button>` : ''}<button class="pill" onclick="recibido('${a.cita_id}',false).then(abrirAvisos)">Recibido</button></span></div>`).join('')}</div>
+      <span style="display:grid;gap:6px">${a.cita_id ? `<button class="pill" onclick="verCitaAviso('${a.cita_id}')">Ver</button>` : ''}<button class="pill" onclick="${a.cita_id ? `recibido('${a.cita_id}',false).then(abrirAvisos)` : `marcarAviso('${a.id}')`}">Recibido</button></span></div>`).join('')}</div>
       <div class="actions"><button class="primary" onclick="todoRecibido()">Marcar todo como recibido</button></div>` : ''}
     <div class="actions"><button class="ghost" onclick="closeSheet()">Cerrar</button></div>`);
 }
@@ -1996,6 +1997,90 @@ function ofrecerFoto() {
   document.addEventListener('click', ocultar, true);
 })();
 
+/* ================= «Lo que he hecho» con Deshacer ================= */
+const HIST_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3 4v4.5h4.5"/><path d="M12 7.5V12l3 2"/></svg>';
+S.act = { quien: 'mis', dias: 1 };
+async function abrirActividad() {
+  const A = S.act, desde = new Date(); desde.setHours(0, 0, 0, 0); desde.setDate(desde.getDate() - (A.dias - 1));
+  sheet(`<h3>Lo que ${A.quien === 'mis' ? 'he hecho' : 'ha hecho el equipo'}</h3>
+    <p class="muted" style="margin:0">Cada cambio en citas, clientes y bloqueos, con su hora. Si te has equivocado, pulsa <b>Deshacer</b>.</p>
+    <div class="chips" style="margin-top:10px">${[[1, 'Hoy'], [2, 'Desde ayer'], [7, '7 días']].map(([d, l]) => `<button aria-pressed="${A.dias === d}" onclick="S.act.dias=${d};abrirActividad()">${l}</button>`).join('')}
+      ${esRecepcion() ? `<span style="width:8px"></span><button aria-pressed="${A.quien === 'mis'}" onclick="S.act.quien='mis';abrirActividad()">Solo yo</button><button aria-pressed="${A.quien === 'todos'}" onclick="S.act.quien='todos';abrirActividad()">Todo el equipo</button>` : ''}</div>
+    <div id="act-lista"><div class="spinner"></div></div>
+    <div class="actions"><button class="ghost" onclick="closeSheet()">Cerrar</button></div>`);
+  let q = sb.from('cambios').select('*').gte('en', desde.toISOString()).order('en', { ascending: false }).limit(300);
+  if (A.quien === 'mis') q = q.eq('usuario', S.user.id);
+  const r = await q, box = $('#act-lista'); if (!box) return;
+  if (r.error) { box.innerHTML = `<div class="box warnb">${/cambios|relation/i.test(r.error.message) ? 'Falta la actualización 11 en la base de datos.' : esc(r.error.message)}</div>`; return; }
+  const l = r.data || [];
+  if (!l.length) { box.innerHTML = `<div class="list" style="margin-top:12px"><p class="row muted">${A.dias === 1 ? 'Hoy todavía no hay cambios.' : 'No hay cambios en estos días.'}</p></div>`; return; }
+  // Datos de las citas y bloqueos para poder decir de qué se trata
+  const ids = t => [...new Set(l.filter(x => x.tabla === t && !(x.campos && x.campos._fila)).map(x => x.registro_id))];
+  const [rc, rb] = await Promise.all([
+    ids('citas').length ? sb.from('citas').select('id,inicio,fin,cliente_id,servicio_id,trabajador_id,estado,concepto').in('id', ids('citas')) : { data: [] },
+    ids('bloqueos').length ? sb.from('bloqueos').select('id,inicio,fin,trabajador_id,motivo').in('id', ids('bloqueos')) : { data: [] }
+  ]);
+  const fila = {}; [...(rc.data || []), ...(rb.data || [])].forEach(x => fila[x.id] = x);
+  l.forEach(x => { if (x.campos && x.campos._fila) fila[x.registro_id] = fila[x.registro_id] || x.campos._fila; });
+  S.actLista = l; S.actFilas = fila;
+  // Un cambio solo se puede deshacer si es el último que sigue vigente sobre lo mismo
+  const ultimo = {}; l.forEach(x => { if (!x.deshecho_en && !(x.campos && x.campos._deshacer) && !ultimo[x.registro_id]) ultimo[x.registro_id] = x.id; });
+  const porDia = {}; l.forEach(x => (porDia[dkey(new Date(x.en))] = porDia[dkey(new Date(x.en))] || []).push(x));
+  box.innerHTML = Object.entries(porDia).map(([d, xs]) => `<div class="sect">${d === dkey(new Date()) ? 'Hoy' : new Date(d + 'T12:00').toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
+    <div class="list actividad">${xs.map(x => filaActividad(x, fila[x.registro_id], ultimo[x.registro_id] === x.id)).join('')}</div>`).join('');
+}
+function queEs(x, f) {
+  if (x.tabla === 'citas') {
+    if (!f) return 'Cita';
+    const d = new Date(f.inicio), s = srv(f.servicio_id);
+    return `Cita de ${cli(f.cliente_id).nombre || 'cliente'} · ${d.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })} ${hhmm(d)} · ${s.precio_libre && f.concepto ? f.concepto : s.nombre || ''}${esRecepcion() ? ' · ' + (trab(f.trabajador_id).nombre || '') : ''}`;
+  }
+  if (x.tabla === 'bloqueos') return f ? `Bloqueo de ${trab(f.trabajador_id).nombre || ''} · ${new Date(f.inicio).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} ${hhmm(new Date(f.inicio))}–${hhmm(new Date(f.fin))}${f.motivo ? ' · ' + f.motivo : ''}` : 'Bloqueo de horas';
+  return 'Ficha de ' + (cli(x.registro_id).nombre || (x.campos && x.campos.nombre && x.campos.nombre[0]) || 'cliente');
+}
+function accionTxt(x) {
+  const c = x.campos || {};
+  if (c._deshacer) return x.accion === 'borrar' ? 'Deshecho: se quitó' : x.accion === 'crear' ? 'Deshecho: se recuperó' : 'Deshecho: volvió a como estaba';
+  if (x.tabla === 'citas' && x.accion === 'cambiar' && c.estado && Object.keys(c).filter(k => k[0] !== '_').length === 1) return c.estado[1] === 'cancelada' ? 'Canceló la cita' : `Marcó la cita como «${ESTADOS[c.estado[1]] || c.estado[1]}»`;
+  if (x.accion === 'crear') return { citas: 'Creó la cita', bloqueos: 'Bloqueó esas horas', clientes: 'Creó la ficha' }[x.tabla];
+  if (x.accion === 'borrar') return { citas: 'Borró la cita', bloqueos: 'Quitó el bloqueo', clientes: 'Borró la ficha' }[x.tabla];
+  return 'Cambió ' + textoCambio(x).replace(/^Actualizó /, '');
+}
+function filaActividad(x, f, esUltimo) {
+  const c = x.campos || {}, mio = x.usuario === S.user.id;
+  const puede = !x.deshecho_en && !c._deshacer && esUltimo && (mio || esRecepcion()) && !(x.tabla === 'clientes' && x.accion === 'borrar');
+  const motivo = x.deshecho_en ? '' : c._deshacer ? '' : !esUltimo ? '<small class="muted">Hay un cambio posterior</small>' : '';
+  return `<div class="row ${x.deshecho_en ? 'deshecho' : ''} ${c._deshacer ? 'es-deshacer' : ''}">
+    <span class="hora">${hhmm(new Date(x.en))}</span>
+    <span class="main"><b>${esc(accionTxt(x))}</b><small>${esc(queEs(x, f))}</small>${S.act.quien === 'todos' ? `<small class="muted">${esc(x.quien || '—')}</small>` : ''}
+      ${x.deshecho_en ? `<small class="ok">Deshecho por ${esc(x.deshecho_por || '—')} a las ${hhmm(new Date(x.deshecho_en))}</small>` : ''}</span>
+    ${puede ? `<button class="pill" onclick="deshacer(${x.id})">Deshacer</button>` : motivo}</div>`;
+}
+async function deshacer(id) {
+  const x = (S.actLista || []).find(y => y.id === id); if (!x) return;
+  const f = (S.actFilas || {})[x.registro_id], que = queEs(x, f);
+  const efecto = x.accion === 'crear'
+    ? (x.tabla === 'citas' ? 'Se quitará esta cita de la agenda' + (esRecepcion() ? ' y se avisará al trabajador.' : ' y se avisará a recepción.') : x.tabla === 'bloqueos' ? 'Se quitará el bloqueo.' : 'Se borrará esta ficha (solo si aún no tiene citas).')
+    : x.accion === 'borrar' ? 'Se recuperará tal como estaba.'
+    : 'Volverá a quedar como estaba antes: ' + textoCambio({ ...x, campos: Object.fromEntries(Object.entries(x.campos).map(([k, v]) => [k, [v[1], v[0]]])) }).replace(/^Actualizó .*/, '') + '.';
+  if (!(await preguntar('¿Deshacer este cambio?', `${accionTxt(x)} · ${que}. ${efecto}`, 'Deshacer', 'Cancelar'))) return;
+  const r = await conSolape(conf => sb.rpc('deshacer_cambio', { p_id: id, p_confirmar: conf }));
+  if (r.cancelado) return;
+  if (r.error) {
+    const m = r.error.message || '';
+    toast(m.includes('NO_DESHACER') ? m.split('|')[1] : /deshacer_cambio/.test(m) ? 'Falta la actualización 13 en la base de datos.' : traducirError(r.error));
+    return;
+  }
+  toast('Deshecho');
+  await Promise.all([cargarDia(), x.tabla === 'clientes' ? cargarClientes() : null, esRecepcion() ? cargarHistorial() : null]);
+  renderVista(); abrirActividad();
+}
+async function marcarAviso(id) {
+  const r = await sb.rpc('marcar_aviso', { p_id: id });
+  if (r.error) { toast(r.error.message); return; }
+  S.avisos = S.avisos.filter(a => a.id !== id); pintarCampana(); abrirAvisos();
+}
+
 /* ================= historial de cambios ================= */
 const CAMPOS_TXT = {
   inicio: 'hora', fin: 'hora de fin', trabajador_id: 'profesional', cabina_id: 'cabina', servicio_id: 'servicio', estado: 'estado', precio: 'precio',
@@ -2019,10 +2104,10 @@ function valorCambio(k, v) {
   return String(v).length > 60 ? String(v).slice(0, 57) + '…' : String(v);
 }
 function textoCambio(x) {
-  const que = x.tabla === 'citas' ? 'la cita' : 'la ficha';
+  const que = x.tabla === 'citas' ? 'la cita' : x.tabla === 'bloqueos' ? 'el bloqueo' : 'la ficha';
   if (x.accion === 'crear') return `Creó ${que}`;
   if (x.accion === 'borrar') return `Borró ${que}`;
-  const partes = Object.entries(x.campos || {}).filter(([k]) => CAMPOS_TXT[k] !== null && !(k === 'fin' && x.campos.inicio)).map(([k, [a, b]]) => {
+  const partes = Object.entries(x.campos || {}).filter(([k]) => k[0] !== '_' && CAMPOS_TXT[k] !== null && !(k === 'fin' && x.campos.inicio)).map(([k, [a, b]]) => {
     const n = CAMPOS_TXT[k] || k;
     if (k === 'salud' || k === 'notas') return `cambió ${n}`;
     return `${n}: ${valorCambio(k, a)} → ${valorCambio(k, b)}`;
