@@ -113,7 +113,7 @@ async function activarNotificaciones() {
   } catch (e) { toast('No se pudieron activar'); }
 }
 async function avisoPrueba(correo) {
-  const r = await sb.functions.invoke('enviar-aviso', { body: { prueba: true, correo } });
+  const r = await sb.functions.invoke(CFG.funcionAvisos || 'enviar-aviso', { body: { prueba: true, correo } });
   if (r.error) { toast('El servidor de avisos aún no está configurado (función «enviar-aviso»).'); return; }
   const d = r.data || {};
   toast(`Enviado: ${d.push || 0} aviso${d.push === 1 ? '' : 's'} al móvil${correo ? ` y ${d.correos || 0} correo${d.correos === 1 ? '' : 's'}` : ''}. Puede tardar unos segundos.`);

@@ -7,6 +7,8 @@ window.APP_CONFIG = {
   supabaseKey: 'sb_publishable_psgvcwg2opBU9g2Je7zyUg_3xykqLwW',
 
   // Clave pública para avisos push (la privada va solo en Supabase → Edge Functions → Secrets)
+  // Nombre interno (slug) de la función de avisos en Supabase → Edge Functions
+  funcionAvisos: 'clever-action',
   vapidPublicKey: 'BHnHgUpukAJzF_chsIOMixN0CrZj8J2gCkTazmGadbOw9M2i_1rFKG_PMysp_BoY1HDgSpTvkTK2qk_Cmx_hDE4',
 
   // false = solo entran los usuarios que crea el centro (no hay registro público)
