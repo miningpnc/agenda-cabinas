@@ -1123,9 +1123,7 @@ async function abrirCita(id, idiomaMsg) {
     <div class="field"><span class="flabel">Estado</span><div class="seg">${Object.keys(ESTADOS).map(e => `<button aria-pressed="${c.estado === e}" onclick="cambiarEstado('${c.id}','${e}')">${ESTADOS[e]}</button>`).join('')}</div></div>
     ${'llego_tarde' in c && (c.estado === 'confirmada' || c.estado === 'realizada') ? `<label class="switch"><span><b>Llegó tarde</b><br><small class="muted">Cuenta en el historial del cliente.</small></span><input type="checkbox" id="c-tarde" ${c.llego_tarde ? 'checked' : ''} onchange="marcarTarde('${c.id}', this.checked)"></label>` : ''}
     ${esRecepcion() && pendienteAlta(cl) ? `<div class="box warnb">Cliente pendiente de alta: cuando llegue, pídele sus datos. <button class="linkbtn" onclick="abrirCliente('${cl.id}')">Abrir su ficha</button></div>` : ''}
-    ${cobro ? `<div class="two"><div class="field"><label for="cb-imp">Cobrado (€)</label><input id="cb-imp" type="number" inputmode="decimal" step="0.01" value="${+cobro.importe}"></div>
-      <div class="field"><label for="cb-met">Forma de pago</label><select id="cb-met"><option value="">—</option>${['efectivo', 'tarjeta', 'bizum', 'otro'].map(m => `<option ${cobro.metodo === m ? 'selected' : ''}>${m}</option>`).join('')}</select></div></div>
-      <div class="actions" style="margin-top:8px"><button class="ghost" onclick="guardarCobro('${c.id}')">Guardar cobro</button></div>` : ''}
+    ${cobro ? panelCobro(c, cobro) : c.estado === 'realizada' && !S.puedeFacturar ? '<div class="box info">El cobro de esta sesión lo confirma recepción.</div>' : ''}
     ${c.estado === 'confirmada' ? `<div class="field"><label for="rem">Recordatorio para el cliente (WhatsApp o SMS)</label>
       <div class="seg">${Object.keys(LANGS).map(l => `<button aria-pressed="${l === lang}" onclick="abrirCita('${c.id}','${l}')">${l.toUpperCase()}</button>`).join('')}</div>
       <textarea id="rem" class="msg">${esc(recordatorio(c, lang))}</textarea>
@@ -1134,6 +1132,8 @@ async function abrirCita(id, idiomaMsg) {
     ${esRecepcion() && c.cliente_id ? `<div class="actions" style="margin-top:8px"><button class="ghost" onclick="abrirCliente('${c.cliente_id}')">Ver ficha del cliente</button></div>` : ''}
     <div id="cita-cambios"></div>`);
   pintarCambiosCita(c.id);
+  repartoCobro();
+  if (S.irAlCobro === c.id && $('#cobro')) { S.irAlCobro = null; $('#cobro').scrollIntoView({ block: 'center' }); setTimeout(() => $('#cb-imp') && $('#cb-imp').focus(), 250); }
 }
 async function editarCita(id) { const c = await obtenerCita(id); if (c) abrirFormulario(c); }
 async function recibido(id, reabrir = true) {
@@ -1153,7 +1153,8 @@ async function cambiarEstado(id, estado) {
   if (!r.data) { toast('No tienes permiso para cambiar esta cita'); return; }
   S.citas = S.citas.map(c => c.id === id ? r.data : c);
   await cargarDia(); if (esRecepcion()) await cargarHistorial();
-  renderVista(); abrirCita(id); toast('Estado: ' + ESTADOS[estado]);
+  if (estado === 'realizada' && S.puedeFacturar) S.irAlCobro = id;
+  renderVista(); abrirCita(id); toast(estado === 'realizada' && S.puedeFacturar ? 'Realizada: confirma lo que se ha cobrado' : 'Estado: ' + ESTADOS[estado]);
 }
 async function marcarTarde(id, v) {
   const r = await sb.from('citas').update({ llego_tarde: v }).eq('id', id).select().maybeSingle();
@@ -1161,10 +1162,33 @@ async function marcarTarde(id, v) {
   S.citas = S.citas.map(c => c.id === id ? r.data : c); if (esRecepcion()) await cargarHistorial();
   toast(v ? 'Marcada: llegó tarde' : 'Quitado el retraso');
 }
+// Lo que se lleva el centro de un cobro: todo si es de un asalariado, el % si es de un autónomo
+const paraCentro = cb => cb.autonomo ? (+cb.importe || 0) * (+cb.porcentaje_centro || 0) / 100 : (+cb.importe || 0);
+const cobroConfirmado = cb => !('confirmado_en' in cb) || !!cb.confirmado_en;
+function panelCobro(c, cb) {
+  const nuevo = 'previsto' in cb, conf = cobroConfirmado(cb), prev = nuevo ? +cb.previsto : precioCita(c), dif = +cb.importe - prev;
+  const quien = trab(c.trabajador_id).nombre || '';
+  return `<div class="cobro ${conf ? 'hecho' : 'pend'}" id="cobro">
+    <div class="cobro-cab"><b>Cobro de la sesión</b><span class="tag ${conf ? 'ok' : 'warn'}">${conf ? (nuevo && cb.confirmado_por ? `Confirmado · ${esc(cb.confirmado_por)}` : 'Confirmado') : 'Pendiente de confirmar'}</span></div>
+    <p class="muted" style="margin:2px 0 8px">Previsto al dar la cita: <b>${eur(prev)}</b>${conf && Math.abs(dif) >= .01 ? ` · <span class="${dif > 0 ? 'ok' : 'bad'}">${dif > 0 ? '+' : ''}${eur(dif)} sobre lo previsto</span>` : ''}${!conf ? '. Si se ha cobrado otra cosa (un extra, un descuento…), cámbialo.' : ''}</p>
+    <div class="two"><div class="field"><label for="cb-imp">Cobrado de verdad (€)</label><input id="cb-imp" type="number" inputmode="decimal" step="0.01" min="0" value="${+cb.importe}" oninput="repartoCobro()"></div>
+      <div class="field"><label for="cb-met">Forma de pago</label><select id="cb-met"><option value="">—</option>${['efectivo', 'tarjeta', 'bizum', 'otro'].map(m => `<option ${cb.metodo === m ? 'selected' : ''}>${m}</option>`).join('')}</select></div></div>
+    ${nuevo ? `<div class="field"><label for="cb-nota">Qué se ha cobrado de más o de menos (opcional)</label><input id="cb-nota" value="${esc(cb.nota || '')}" placeholder="p. ej. + esmaltado semipermanente, descuento bono…"></div>` : ''}
+    ${nuevo && cb.autonomo ? `<p class="reparto" id="cb-reparto" data-pct="${+cb.porcentaje_centro || 0}" data-quien="${esc(quien)}"></p>` : ''}
+    <div class="actions" style="margin-top:6px"><button class="primary" onclick="guardarCobro('${c.id}')">${conf ? 'Guardar cambios' : 'Confirmar cobro'}</button></div></div>`;
+}
+function repartoCobro() {
+  const p = $('#cb-reparto'); if (!p) return;
+  const imp = +$('#cb-imp').value || 0, pct = +p.dataset.pct, centro = imp * pct / 100;
+  p.innerHTML = `Reparto: <b>${eur(centro)}</b> para el centro (${pct} %) · <b>${eur(imp - centro)}</b> para ${esc(p.dataset.quien)}`;
+}
 async function guardarCobro(id) {
-  const r = await sb.from('cobros').update({ importe: +$('#cb-imp').value || 0, metodo: $('#cb-met').value || null }).eq('cita_id', id).select().maybeSingle();
+  const d = { importe: Math.max(0, +$('#cb-imp').value || 0), metodo: $('#cb-met').value || null };
+  if ($('#cb-nota')) d.nota = $('#cb-nota').value.trim() || null;
+  const r = await sb.from('cobros').update(d).eq('cita_id', id).select().maybeSingle();
   if (r.error || !r.data) { toast(r.error ? r.error.message : 'No tienes permiso'); return; }
-  toast('Cobro guardado'); if (S.tab === 'facturacion') renderVista();
+  toast('Cobro confirmado'); if (S.tab === 'facturacion') renderVista();
+  abrirCita(id);
 }
 function recordatorio(c, lang) {
   const cl = cli(c.cliente_id), s = srv(c.servicio_id), A = S.ajustes, d = new Date(c.inicio);
@@ -2351,7 +2375,7 @@ async function cargarEstadisticas() {
 }
 // Suma los días de un rango [a, b] (claves AAAA-MM-DD) del paquete completo
 function sumaDias(todo, a, b, t) {
-  const o = { imp: 0, n: 0, nv: 0, ca: 0, pe: 0, mo: 0 };
+  const o = { imp: 0, cen: 0, prev: 0, n: 0, nv: 0, ca: 0, pe: 0, mo: 0 };
   for (const x of todo.dias) if ((!a || x.d >= a) && x.d <= b && (!t || x.t === t)) for (const k in o) o[k] += +x[k] || 0;
   return o;
 }
@@ -2445,14 +2469,16 @@ function pintarEstadisticas(E, todo) {
   const diaTop = porDia.indexOf(Math.max(...porDia));
   const franja = c => `${DIAS_L[c.w - 1].toLowerCase()} de ${c.h} a ${c.h + 1} h`;
   // Profesionales y servicios
-  const porT = {}; E.dias.forEach(x => { const p = porT[x.t] = porT[x.t] || { imp: 0, n: 0, nv: 0, ca: 0, mo: 0 }; for (const k in p) p[k] += +x[k] || 0; });
+  const hayCen = E.dias.some(x => 'cen' in x);
+  const porT = {}; E.dias.forEach(x => { const p = porT[x.t] = porT[x.t] || { imp: 0, cen: 0, n: 0, nv: 0, ca: 0, mo: 0 }; for (const k in p) p[k] += +x[k] || 0; });
   const maxT = Math.max(1, ...Object.values(porT).map(p => p.imp));
   const serv = [...E.servicios].sort((p, q) => q.imp - p.imp).slice(0, 8), maxS = Math.max(1, ...serv.map(x => +x.imp));
   const cmp = tot._cmp || tot;
   return `<div class="stats">
       <div class="stat"><small>Facturado</small><b>${eur0(tot.imp)}</b>${ant ? delta(cmp.imp, ant.imp) : `<em>desde ${fechaCorta(E.desde + 'T12:00')} ${E.desde.slice(0, 4)}</em>`}</div>
+      ${hayCen ? `<div class="stat"><small>Para el centro</small><b>${eur0(tot.cen)}</b>${ant && ant.cen ? delta(cmp.cen, ant.cen) : `<em>asalariados + alquiler de autónomos</em>`}</div>` : ''}
       <div class="stat"><small>Citas realizadas</small><b>${tot.n.toLocaleString('es-ES')}</b>${ant ? delta(cmp.n, ant.n) : ''}</div>
-      <div class="stat"><small>Ticket medio</small><b>${eur(tot.n ? Math.round(tot.imp / tot.n * 100) / 100 : 0)}</b><em>por cita realizada</em></div>
+      <div class="stat"><small>Ticket medio</small><b>${eur(tot.n ? Math.round(tot.imp / tot.n * 100) / 100 : 0)}</b><em>${hayCen && Math.abs(tot.imp - tot.prev) >= 1 ? `${tot.imp > tot.prev ? '+' : ''}${eur0(tot.imp - tot.prev)} sobre lo previsto` : 'por cita realizada'}</em></div>
       <div class="stat"><small>Ocupación</small><b>${pct(ocu, cap)} %</b><em>${Math.round(Math.max(0, cap - ocu) / 60).toLocaleString('es-ES')} h libres en el periodo</em></div>
       <div class="stat"><small>No vinieron</small><b class="${pct(tot.nv, reserv) >= 8 ? 'bad' : ''}">${pct(tot.nv, reserv)} %</b><em>${tot.nv} citas · ${tot.ca} canceladas</em></div>
     </div>
@@ -2477,12 +2503,12 @@ function pintarEstadisticas(E, todo) {
     </div>
     <div class="escala"><span>Más libre</span><i></i><span>Más lleno</span></div></div>
     <div class="sect">Por profesional</div>
-    <div class="tablewrap"><table><thead><tr><th>Profesional</th><th>Facturado</th><th></th><th>Citas</th><th>Ticket medio</th><th>No vino</th></tr></thead><tbody>
-      ${Object.entries(porT).sort((p, q) => q[1].imp - p[1].imp).map(([k, p]) => `<tr><td>${esc(trab(k).nombre || '—')}</td><td><b>${eur0(p.imp)}</b></td><td class="barra-celda"><i style="width:${p.imp / maxT * 100}%"></i></td><td>${p.n}</td><td>${eur(p.n ? Math.round(p.imp / p.n * 100) / 100 : 0)}</td><td>${pct(p.nv, p.n + p.nv + p.ca)} %</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Sin datos</td></tr>'}
+    <div class="tablewrap"><table><thead><tr><th>Profesional</th><th>Facturado</th><th></th>${hayCen ? '<th>Para el centro</th>' : ''}<th>Citas</th><th>Ticket medio</th><th>No vino</th></tr></thead><tbody>
+      ${Object.entries(porT).sort((p, q) => q[1].imp - p[1].imp).map(([k, p]) => `<tr><td>${esc(trab(k).nombre || '—')}</td><td><b>${eur0(p.imp)}</b></td><td class="barra-celda"><i style="width:${p.imp / maxT * 100}%"></i></td>${hayCen ? `<td>${eur0(p.cen)}${trab(k).tipo === 'autonomo' ? `<br><small class="muted">autónomo ${+trab(k).porcentaje_centro} %</small>` : ''}</td>` : ''}<td>${p.n}</td><td>${eur(p.n ? Math.round(p.imp / p.n * 100) / 100 : 0)}</td><td>${pct(p.nv, p.n + p.nv + p.ca)} %</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Sin datos</td></tr>'}
     </tbody></table></div>
     <div class="sect">Servicios que más facturan</div>
     <div class="bars">${serv.map(x => `<div class="bar"><span>${esc(srv(x.s).nombre || 'Otro')}</span><b class="num">${eur0(x.imp)} · ${x.n}</b><div class="track"><i style="width:${x.imp / maxS * 100}%"></i></div></div>`).join('') || '<p class="muted">Sin datos</p>'}</div>
-    <p class="note">Facturado = citas realizadas, con lo cobrado. Ocupación = tiempo reservado frente al horario de apertura de todo el equipo. Pasa el dedo o el ratón por las gráficas para ver cada valor.</p>`;
+    <p class="note">Facturado = citas realizadas, con lo cobrado de verdad.${hayCen ? ' Para el centro = todo lo de los asalariados más el porcentaje de alquiler de los autónomos.' : ''} Ocupación = tiempo reservado frente al horario de apertura de todo el equipo. Pasa el dedo o el ratón por las gráficas para ver cada valor.</p>`;
 }
 function imprimirInforme() {
   const c = $('#est'); if (!c || !S.estActual) return;
@@ -2494,8 +2520,8 @@ function imprimirInforme() {
 }
 function descargarEstadisticas() {
   if (!S.estActual) return;
-  const E = S.estActual.datos, filas = [['Fecha', 'Profesional', 'Citas realizadas', 'Facturado', 'No vino', 'Canceladas', 'Pendientes', 'Minutos reservados']];
-  [...E.dias].sort((p, q) => p.d.localeCompare(q.d) || String(p.t).localeCompare(String(q.t))).forEach(x => filas.push([x.d, trab(x.t).nombre || '', x.n, String(x.imp).replace('.', ','), x.nv, x.ca, x.pe, x.mo]));
+  const E = S.estActual.datos, filas = [['Fecha', 'Profesional', 'Citas realizadas', 'Facturado', 'Para el centro', 'No vino', 'Canceladas', 'Pendientes', 'Minutos reservados']];
+  [...E.dias].sort((p, q) => p.d.localeCompare(q.d) || String(p.t).localeCompare(String(q.t))).forEach(x => filas.push([x.d, trab(x.t).nombre || '', x.n, String(x.imp).replace('.', ','), String(x.cen ?? x.imp).replace('.', ','), x.nv, x.ca, x.pe, x.mo]));
   const csv = '﻿' + filas.map(f => f.map(v => /[;"\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v).join(';')).join('\r\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
@@ -2547,29 +2573,52 @@ function vistaFacturacion() {
 }
 async function cargarFacturacion() {
   const { a, b } = rangoPeriodo();
-  const r = await todasLasFilas(() => sb.from('citas').select('id,inicio,estado,trabajador_id,servicio_id' + (hayPrecioLibre() ? ',precio' : '') + ',cobros(importe,metodo)').gte('inicio', a.toISOString()).lt('inicio', b.toISOString()).order('inicio').order('id'));
+  const r = await todasLasFilas(() => sb.from('citas').select('id,inicio,estado,trabajador_id,servicio_id,cliente_id' + (hayPrecioLibre() ? ',precio,concepto' : '') + ',cobros(*)').gte('inicio', a.toISOString()).lt('inicio', b.toISOString()).order('inicio').order('id'));
   const box = $('#fact'); if (!box) return;
   if (r.error) { box.innerHTML = `<p class="err">${esc(r.error.message)}</p>`; return; }
-  const filas = r.data.map(c => { const cb = Array.isArray(c.cobros) ? c.cobros[0] : c.cobros; return { ...c, importe: cb ? +cb.importe : 0, precio: precioCita(c) }; });
+  const filas = r.data.map(c => { const cb = (Array.isArray(c.cobros) ? c.cobros[0] : c.cobros) || null; return { ...c, cb, importe: cb ? +cb.importe : 0, precio: precioCita(c) }; });
   const sum = (l, f) => l.reduce((s, x) => s + f(x), 0);
-  const real = filas.filter(c => c.estado === 'realizada'), pend = filas.filter(c => c.estado === 'confirmada');
-  const nov = filas.filter(c => c.estado === 'no vino'), canc = filas.filter(c => c.estado === 'cancelada');
-  const tReal = sum(real, c => c.importe), tPend = sum(pend, c => c.precio), tPerd = sum(nov, c => c.precio) + sum(canc, c => c.precio);
-  const porTrab = {}; filas.forEach(c => { const p = porTrab[c.trabajador_id] = porTrab[c.trabajador_id] || { r: 0, n: 0, nv: 0, ca: 0, pe: 0 }; if (c.estado === 'realizada') { p.r += c.importe; p.n++; } if (c.estado === 'no vino') p.nv++; if (c.estado === 'cancelada') p.ca++; if (c.estado === 'confirmada') p.pe += c.precio; });
-  const porAct = {}; real.forEach(c => { const k = srv(c.servicio_id).actividad_id || '-'; porAct[k] = (porAct[k] || 0) + c.importe; });
+  const hechas = filas.filter(c => c.estado === 'realizada');
+  const conf = hechas.filter(c => c.cb && cobroConfirmado(c.cb)), porConf = hechas.filter(c => !c.cb || !cobroConfirmado(c.cb));
+  const pend = filas.filter(c => c.estado === 'confirmada'), nov = filas.filter(c => c.estado === 'no vino'), canc = filas.filter(c => c.estado === 'cancelada');
+  const tReal = sum(conf, c => c.importe), tPorConf = sum(porConf, c => c.cb ? c.importe : c.precio), tPend = sum(pend, c => c.precio), tPerd = sum(nov, c => c.precio) + sum(canc, c => c.precio);
+  const tCentro = sum(conf, c => paraCentro(c.cb)), extras = sum(conf.filter(c => 'previsto' in c.cb), c => c.importe - (+c.cb.previsto || 0));
+  const hayReparto = filas.some(c => c.cb && 'autonomo' in c.cb) || S.trabajadores.some(t => t.tipo === 'autonomo');
+  // Por trabajador
+  const porTrab = {}; filas.forEach(c => {
+    const p = porTrab[c.trabajador_id] = porTrab[c.trabajador_id] || { r: 0, cen: 0, n: 0, pc: 0, pcImp: 0, nv: 0, ca: 0, pe: 0 };
+    if (c.estado === 'realizada') { if (c.cb && cobroConfirmado(c.cb)) { p.r += c.importe; p.cen += paraCentro(c.cb); p.n++; } else { p.pc++; p.pcImp += c.cb ? c.importe : c.precio; } }
+    if (c.estado === 'no vino') p.nv++; if (c.estado === 'cancelada') p.ca++; if (c.estado === 'confirmada') p.pe += c.precio;
+  });
+  const porAct = {}; conf.forEach(c => { const k = srv(c.servicio_id).actividad_id || '-'; porAct[k] = (porAct[k] || 0) + c.importe; });
   const maxA = Math.max(1, ...Object.values(porAct));
-  box.innerHTML = `<div class="stats">
-      <div class="stat"><small>Facturado</small><b>${eur(tReal)}</b><em>${real.length} ${real.length === 1 ? 'cita realizada' : 'citas realizadas'}</em></div>
+  const yoT = yo(), autonomo = !esRecepcion() && yoT && yoT.tipo === 'autonomo';
+  const pctMio = autonomo ? (conf.length ? +conf[conf.length - 1].cb.porcentaje_centro || +yoT.porcentaje_centro : +yoT.porcentaje_centro) : 0;
+  const tipoTxt = t => t.tipo === 'autonomo' ? `Autónomo ${+t.porcentaje_centro} %` : t.tipo ? 'Asalariado' : '';
+  const kpis = esRecepcion() ? `
+      <div class="stat"><small>Facturado real</small><b>${eur(tReal)}</b><em>${conf.length} ${conf.length === 1 ? 'sesión confirmada' : 'sesiones confirmadas'}${Math.abs(extras) >= .01 ? ` · <span class="${extras > 0 ? 'ok' : 'bad'}">${extras > 0 ? '+' : ''}${eur(extras)} sobre lo previsto</span>` : ''}</em></div>
+      ${hayReparto ? `<div class="stat"><small>Para el centro</small><b>${eur(tCentro)}</b><em>asalariados + % de autónomos</em></div>` : ''}
+      <div class="stat"><small>Por confirmar</small><b class="${porConf.length ? 'warn' : ''}">${eur(tPorConf)}</b><em>${porConf.length} ${porConf.length === 1 ? 'sesión hecha' : 'sesiones hechas'} sin confirmar el cobro</em></div>
       <div class="stat"><small>Previsto pendiente</small><b>${eur(tPend)}</b><em>${pend.length} ${pend.length === 1 ? 'cita' : 'citas'} por hacer</em></div>
-      <div class="stat"><small>Perdido</small><b class="${tPerd ? 'bad' : ''}">${eur(tPerd)}</b><em>${nov.length} no vino · ${canc.length} canceladas</em></div>
-      <div class="stat"><small>Total previsto al inicio</small><b>${eur(sum(filas, c => c.precio))}</b><em>${filas.length} ${filas.length === 1 ? 'cita reservada' : 'citas reservadas'}</em></div>
-    </div>
-    ${esRecepcion() ? `<div class="sect">Por trabajador</div><div class="tablewrap"><table><thead><tr><th>Trabajador</th><th>Realizadas</th><th>Facturado</th><th>Pendiente</th><th>No vino</th><th>Canceladas</th></tr></thead><tbody>
-      ${Object.entries(porTrab).sort((x, y) => y[1].r - x[1].r).map(([k, p]) => `<tr><td>${esc(trab(k).nombre)}</td><td>${p.n}</td><td><b>${eur(p.r)}</b></td><td>${eur(p.pe)}</td><td class="${p.nv ? 'bad' : ''}">${p.nv}</td><td>${p.ca}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Sin citas en este periodo.</td></tr>'}
-      </tbody><tfoot><tr><td>Total</td><td>${real.length}</td><td>${eur(tReal)}</td><td>${eur(tPend)}</td><td>${nov.length}</td><td>${canc.length}</td></tr></tfoot></table></div>` : ''}
+      <div class="stat"><small>Perdido</small><b class="${tPerd ? 'bad' : ''}">${eur(tPerd)}</b><em>${nov.length} no vino · ${canc.length} canceladas</em></div>`
+    : `
+      <div class="stat"><small>Facturado real</small><b>${eur(tReal)}</b><em>${conf.length} ${conf.length === 1 ? 'sesión confirmada' : 'sesiones confirmadas'}${Math.abs(extras) >= .01 ? ` · ${extras > 0 ? '+' : ''}${eur(extras)} sobre lo previsto` : ''}</em></div>
+      ${autonomo ? `<div class="stat"><small>Alquiler de sala (${pctMio} %)</small><b>${eur(tCentro)}</b><em>para el centro</em></div>
+      <div class="stat"><small>Tu parte</small><b class="ok">${eur(tReal - tCentro)}</b><em>lo facturado menos el alquiler</em></div>` : ''}
+      <div class="stat"><small>Por confirmar</small><b class="${porConf.length ? 'warn' : ''}">${eur(tPorConf)}</b><em>${porConf.length} ${porConf.length === 1 ? 'sesión' : 'sesiones'} sin confirmar</em></div>
+      <div class="stat"><small>Previsto pendiente</small><b>${eur(tPend)}</b><em>${pend.length} ${pend.length === 1 ? 'cita' : 'citas'} por hacer</em></div>`;
+  const listaPorConf = porConf.filter(c => esRecepcion() || c.trabajador_id === S.meId).slice(0, 40);
+  box.innerHTML = `<div class="stats">${kpis}</div>
+    ${listaPorConf.length ? `<div class="sect">Sesiones hechas sin confirmar el cobro</div>
+    <div class="list">${listaPorConf.map(c => { const t = trab(c.trabajador_id), d = new Date(c.inicio); return `<button class="row" onclick="S.irAlCobro='${c.id}';abrirCita('${c.id}')">
+      <span class="main"><b>${esc(cli(c.cliente_id).nombre || 'Sin cliente')} · ${esc(nombreCita(c))}</b><small>${d.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })} ${hhmm(d)}${esRecepcion() ? ' · ' + esc(t.nombre || '') + (t.tipo === 'autonomo' ? ' (autónomo: lo puede confirmar él/ella)' : '') : ''}</small></span>
+      <span class="end"><b class="num">${eur(c.cb ? c.importe : c.precio)}</b><small class="muted">previsto</small></span><span class="pill">Confirmar</span></button>`; }).join('')}</div>` : ''}
+    ${esRecepcion() ? `<div class="sect">Por trabajador</div><div class="tablewrap"><table><thead><tr><th>Trabajador</th><th>Sesiones</th><th>Facturado real</th>${hayReparto ? '<th>Para el centro</th><th>Para el profesional</th>' : ''}<th>Por confirmar</th><th>Pendiente</th><th>No vino</th><th>Canceladas</th></tr></thead><tbody>
+      ${Object.entries(porTrab).sort((x, y) => y[1].r - x[1].r).map(([k, p]) => { const t = trab(k); return `<tr><td>${esc(t.nombre)}${tipoTxt(t) ? `<br><small class="muted">${tipoTxt(t)}</small>` : ''}</td><td>${p.n}</td><td><b>${eur(p.r)}</b></td>${hayReparto ? `<td>${eur(p.cen)}</td><td>${p.r - p.cen > .004 ? eur(p.r - p.cen) : '—'}</td>` : ''}<td class="${p.pc ? 'warn' : ''}">${p.pc ? `${p.pc} · ${eur(p.pcImp)}` : '—'}</td><td>${eur(p.pe)}</td><td class="${p.nv ? 'bad' : ''}">${p.nv}</td><td>${p.ca}</td></tr>`; }).join('') || `<tr><td colspan="${hayReparto ? 9 : 7}" class="muted">Sin citas en este periodo.</td></tr>`}
+      </tbody><tfoot><tr><td>Total</td><td>${conf.length}</td><td>${eur(tReal)}</td>${hayReparto ? `<td>${eur(tCentro)}</td><td>${eur(tReal - tCentro)}</td>` : ''}<td>${porConf.length ? `${porConf.length} · ${eur(tPorConf)}` : '—'}</td><td>${eur(tPend)}</td><td>${nov.length}</td><td>${canc.length}</td></tr></tfoot></table></div>` : ''}
     <div class="sect">Facturado por actividad</div>
-    <div class="bars">${Object.entries(porAct).sort((x, y) => y[1] - x[1]).map(([k, v]) => `<div class="bar"><span>${esc(act(k).nombre)}</span><b class="num">${eur(v)}</b><div class="track"><i style="width:${v / maxA * 100}%;background:${esc(act(k).color)}"></i></div></div>`).join('') || '<p class="muted" style="margin:0">Aún no hay nada facturado en este periodo.</p>'}</div>
-    <p class="note">Facturado = citas marcadas como «Realizada», con el importe cobrado. Previsto = precio de carta de las citas que aún están confirmadas. Perdido = precio de las que no vinieron o se cancelaron.</p>`;
+    <div class="bars">${Object.entries(porAct).sort((x, y) => y[1] - x[1]).map(([k, v]) => `<div class="bar"><span>${esc(act(k).nombre)}</span><b class="num">${eur(v)}</b><div class="track"><i style="width:${v / maxA * 100}%;background:${esc(act(k).color)}"></i></div></div>`).join('') || '<p class="muted" style="margin:0">Aún no hay nada confirmado en este periodo.</p>'}</div>
+    <p class="note">Facturado real = sesiones «Realizadas» con el cobro confirmado, por lo que se cobró de verdad (puede ser más o menos que lo previsto). ${hayReparto ? 'De los asalariados, todo es para el centro; de los autónomos, solo su porcentaje (alquiler de sala). ' : ''}Por confirmar = sesiones hechas cuyo cobro aún no se ha revisado (los autónomos confirman los suyos; recepción, los de los asalariados). Previsto = precio de carta de las citas aún por hacer. Perdido = no vinieron o se cancelaron.</p>`;
 }
 
 /* ================= ajustes (recepción) ================= */
@@ -2588,7 +2637,7 @@ function vistaAjustes() {
 
   <div class="sect">Equipo<button class="pill" onclick="editarTrabajador()">+ Trabajador</button></div>
   <div class="list">${S.trabajadores.map(t => `<button class="row" onclick="editarTrabajador('${t.id}')">${avatarTrab(t, 36, true)}<span class="main"><b>${esc(t.nombre)}${t.activo ? '' : ' <small class="muted">(de baja)</small>'}</b><small>${esc(t.email || 'Sin email: no podrá entrar en la app')}</small>
-    <span class="tagline">${[...(S.tAct[t.id] || [])].map(id => `<span class="tag">${esc(act(id).nombre)}</span>`).join('')}${t.ver_facturacion ? '<span class="tag">Ve su facturación</span>' : ''}${t.email ? `<span class="tag" data-vinc="${t.id}">…</span>` : ''}</span></span></button>`).join('') || '<p class="row muted">Añade a tu primer trabajador.</p>'}</div>
+    <span class="tagline">${[...(S.tAct[t.id] || [])].map(id => `<span class="tag">${esc(act(id).nombre)}</span>`).join('')}${'tipo' in t ? `<span class="tag ${t.tipo === 'autonomo' ? 'info' : ''}">${t.tipo === 'autonomo' ? `Autónomo · ${+t.porcentaje_centro} % al centro` : 'Asalariado'}</span>` : t.ver_facturacion ? '<span class="tag">Ve su facturación</span>' : ''}${t.email ? `<span class="tag" data-vinc="${t.id}">…</span>` : ''}</span></span></button>`).join('') || '<p class="row muted">Añade a tu primer trabajador.</p>'}</div>
 
   <div class="sect">Cabinas<button class="pill" onclick="editarCabina()">+ Cabina</button></div>
   <div class="list">${S.cabinas.map(c => `<button class="row" onclick="editarCabina('${c.id}')"><span class="main"><b>${esc(c.nombre)}${c.activa ? '' : ' <small class="muted">(cerrada)</small>'}</b><small>${esc(S.trabajadores.filter(t => (S.tCab[t.id] || []).some(x => x.cabina_id === c.id)).map(t => t.nombre).join(', ') || 'Sin trabajadores habituales')}</small></span></button>`).join('') || '<p class="row muted">Crea tu primera cabina.</p>'}</div>
@@ -2654,15 +2703,29 @@ function editarTrabajador(id) {
     ${S.trabajadores.some(x => 'fecha_nacimiento' in x) ? `<div class="field"><label for="t-nac">Fecha de nacimiento (opcional)</label><input id="t-nac" type="date" value="${esc(t.fecha_nacimiento || '')}"><small class="muted">La app le felicitará el día de su cumpleaños y avisará a recepción.</small></div>` : ''}
     <div class="field"><span class="flabel">A qué se dedica (puede ser más de una cosa)</span><div class="checks">${S.actividades.map(a => `<label><input type="checkbox" name="t-act" value="${a.id}" ${acts.has(a.id) ? 'checked' : ''}><i style="width:10px;height:10px;border-radius:3px;background:${esc(a.color)}"></i>${esc(a.nombre)}</label>`).join('')}</div></div>
     <div class="field"><span class="flabel">Cabinas habituales · ● principal</span><div class="checks">${S.cabinas.filter(c => c.activa).map(c => `<label><input type="checkbox" name="t-cab" value="${c.id}" ${cabs.some(x => x.cabina_id === c.id) ? 'checked' : ''}>${esc(c.nombre)}<input type="radio" name="t-pri" value="${c.id}" ${principal === c.id ? 'checked' : ''} aria-label="Principal" style="margin-left:auto"></label>`).join('') || '<span class="muted">Primero crea cabinas.</span>'}</div></div>
-    <label class="switch"><span><b>Ve su facturación</b><br><small class="muted">Para autónomos: verá lo facturado en sus propias citas, nunca el total del centro.</small></span><input type="checkbox" id="t-fact" ${t.ver_facturacion ? 'checked' : ''}></label>
+    ${hayTipo() ? `<div class="field"><span class="flabel">Tipo de trabajador</span><div class="seg" id="t-tipo">${[['asalariado', 'Asalariado'], ['autonomo', 'Autónomo']].map(([k, n]) => `<button type="button" aria-pressed="${(t.tipo || 'asalariado') === k}" onclick="elegirTipo('${k}')">${n}</button>`).join('')}</div>
+      <small class="muted" id="t-tipo-ayuda">${tipoAyuda(t.tipo || 'asalariado')}</small></div>
+      <div class="field" id="t-pct-campo" ${(t.tipo || 'asalariado') === 'autonomo' ? '' : 'hidden'}><label for="t-pct">Porcentaje para el centro (alquiler de sala)</label>
+        <div class="con-sufijo"><input id="t-pct" type="number" inputmode="decimal" min="0" max="100" step="0.5" value="${+(t.porcentaje_centro || 0) || 30}"><span>%</span></div>
+        <small class="muted">De cada sesión que cobre, este porcentaje es para el centro y el resto para él/ella. Si lo cambias, solo afecta a las sesiones nuevas.</small></div>`
+    : `<label class="switch"><span><b>Ve su facturación</b><br><small class="muted">Para autónomos: verá lo facturado en sus propias citas, nunca el total del centro.</small></span><input type="checkbox" id="t-fact" ${t.ver_facturacion ? 'checked' : ''}></label>`}
     <label class="switch"><span><b>En activo</b><br><small class="muted">Si lo desactivas deja de salir en la agenda; su historial se conserva.</small></span><input type="checkbox" id="t-act-on" ${t.activo ? 'checked' : ''}></label>
     <div class="box info">${REGISTRO ? 'Para entrar, el trabajador abre la app, pulsa «Es mi primera vez» y crea su contraseña con <b>este mismo email</b>.' : 'Para que pueda entrar, crea su usuario en Supabase (Authentication → Users → Add user) con <b>este mismo email</b> y una contraseña, y pásasela en persona.'}</div>
     <div class="err" id="t-err"></div>
     <div class="actions"><button class="ghost" onclick="closeSheet()">Cancelar</button><button class="primary" onclick="guardarTrabajador(${id ? `'${id}'` : 'null'})">Guardar</button></div>`);
 }
+const hayTipo = () => S.trabajadores.some(t => 'tipo' in t);
+const tipoAyuda = k => k === 'autonomo' ? 'Factura por su cuenta: ve su facturación, confirma el cobro real de sus sesiones y paga al centro un porcentaje.' : 'Empleado del centro: no ve importes; recepción confirma el cobro de sus sesiones y todo lo facturado es del centro.';
+function elegirTipo(k) {
+  const g = $('#t-tipo'); g.dataset.v = k;
+  g.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.textContent.toLowerCase().startsWith(k.slice(0, 4)) ? 'true' : 'false'));
+  $('#t-tipo-ayuda').textContent = tipoAyuda(k); $('#t-pct-campo').hidden = k !== 'autonomo';
+}
 async function guardarTrabajador(id) {
   const err = $('#t-err');
-  const d = { nombre: $('#t-nombre').value.trim(), email: $('#t-email').value.trim().toLowerCase() || null, telefono: $('#t-tel').value.trim() || null, ver_facturacion: $('#t-fact').checked, activo: $('#t-act-on').checked };
+  const d = { nombre: $('#t-nombre').value.trim(), email: $('#t-email').value.trim().toLowerCase() || null, telefono: $('#t-tel').value.trim() || null, activo: $('#t-act-on').checked };
+  if ($('#t-fact')) d.ver_facturacion = $('#t-fact').checked;
+  if ($('#t-tipo')) { d.tipo = $('#t-tipo').dataset.v || (t0 => t0 ? t0.tipo : 'asalariado')(id && trab(id)) || 'asalariado'; d.porcentaje_centro = d.tipo === 'autonomo' ? Math.min(100, Math.max(0, +$('#t-pct').value || 0)) : 0; }
   if ($('#t-nac')) d.fecha_nacimiento = $('#t-nac').value || null;
   if (!d.nombre) { err.textContent = 'Escribe el nombre.'; return; }
   const acts = [...document.querySelectorAll('input[name=t-act]:checked')].map(i => i.value);

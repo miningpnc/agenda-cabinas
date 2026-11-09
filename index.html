@@ -448,7 +448,7 @@ table.imp select{font-size:12px;padding:4px;max-width:160px}
 .informe h1{font-size:18pt;margin:0}
 .informe header p{margin:2px 0 0;color:#555}
 .informe .chart,.informe .stat,.informe .tablewrap,.informe .claves{break-inside:avoid}
-.informe .stats{grid-template-columns:repeat(5,1fr)}
+.informe .stats{grid-template-columns:repeat(3,1fr)}
 .informe .dos-col{grid-template-columns:1fr 1fr}
 .informe .mapa-calor i small{display:block}
 
@@ -488,6 +488,17 @@ label.boton{display:inline-flex;align-items:center;cursor:pointer}
 .actividad .row.deshecho b{text-decoration:line-through;color:var(--muted)}
 .actividad .row.es-deshacer{background:var(--sunken)}
 .actividad .row.es-deshacer b{font-weight:600;color:var(--muted)}
+
+/* ---------- cobro real ---------- */
+.cobro{border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-top:12px;background:var(--surface)}
+.cobro.pend{border-color:var(--warn);background:color-mix(in srgb,var(--warn) 7%,var(--surface))}
+.cobro-cab{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.cobro .reparto{margin:6px 0 0;font-size:13px;color:var(--muted)}
+.cobro .reparto b{color:var(--ink)}
+.tag.ok{color:var(--ok)} .tag.warn{color:var(--warn)} .tag.info{color:var(--accent)}
+b.warn,td.warn{color:var(--warn)}
+.con-sufijo{display:flex;align-items:center;gap:8px}
+.con-sufijo input{max-width:110px}
 </style>
 </head>
 <body>
