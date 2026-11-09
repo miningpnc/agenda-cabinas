@@ -1,10 +1,10 @@
 # Mantiene despierta la base de datos: el plan gratuito la pausa tras una semana sin uso.
-# Cada 3 días hace una consulta mínima (con la clave pública, la misma que usa la web).
+# Cada día hace una consulta mínima (con la clave pública, la misma que usa la web).
 # Se puede lanzar a mano en la pestaña «Actions» → «Mantener activa la base de datos» → «Run workflow».
 name: Mantener activa la base de datos
 on:
   schedule:
-    - cron: '17 6 */3 * *'
+    - cron: '17 6 * * *'
   workflow_dispatch:
 jobs:
   ping:
